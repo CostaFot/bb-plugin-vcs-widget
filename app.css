@@ -1,0 +1,7 @@
+/* VCS Group. Tailwind utilities in the components compile against the host
+   theme's tokens; only the few rules below need plain CSS. */
+
+/* cmdk marks the highlighted row; keep the "..." button visible there. */
+[cmdk-item][data-selected="true"] [aria-label^="Actions for"] {
+  opacity: 1;
+}
