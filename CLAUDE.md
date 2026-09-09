@@ -15,12 +15,13 @@ comments (`claude: step N done, <what>`), never in files here.
 - COS-122 Milestone 2: full context menu, background push/pull jobs, live refresh, favourites — shipped 2026-09-09
 - COS-123 Milestone 3: own commit dialog (panel tab, staging, diff preview, commit as a job, amend, discard) — shipped 2026-09-09
 - COS-124 Milestone 4: own git log panel — shipped 2026-09-09
-- COS-125 Milestone 5: settings, read-only CLI and agent tool, release
+- COS-125 Milestone 5: settings sections, read-only CLI and agent tool, skill,
+  compact pass, README screenshots — shipped 2026-09-09
+- COS-130 marketplace submission — open, and only on Costa's word
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
-designs), load the `bb-plugin-authoring` skill with the Skill tool, continue
-from the last completed step.
+designs), load the `bb-plugin-authoring` skill with the Skill tool.
 
 ## Architecture (three runtimes, one contract file)
 
@@ -55,12 +56,20 @@ app.tsx (browser) --useRpc(rpcContract, keyed by threadId)--> server.ts (bb serv
   `bb.sdk.environments.status` (0 s and 3.2 s) and publishes `changed`. It
   maps `hostId + repoRoot` to environment ids (from overviews) to route
   `jobEvent` (realtime `job`) and `changed` signals, and keeps favourites in
-  kv (`fav:<hostId>:<repoRoot>`).
+  kv (`fav:<hostId>:<repoRoot>`; the settings page lists and clears them
+  through `favouriteRepos` / `clearFavourites`, which rebuild the key from
+  `hostId` and `repoRoot` so a caller never names a storage key).
+- `server/cli.ts` is the whole read-only surface: argv parsing, the text and
+  `--json` shapes, and a `CliReader` with exactly two methods (overview,
+  log). `bb.cli.register` and `bb.agents.registerTool("vcs_widget_status")`
+  both go through it, which is what keeps them read-only — the module names
+  no mutating host method. `skills/vcs-widget/SKILL.md` tells agents the same.
 - `app.tsx` registers `experimental_threadHeaderAction`, four
   `threadPanelAction` tabs (`compare`, `diff` in `views/panels.tsx`; `commit`
   in `views/CommitPanel.tsx`; `log` in `views/LogPanel.tsx`, the last two
   opened by their popup quick action and by a palette row without the popup;
-  the ids live in `shared/panel-params.ts`) and `commandPaletteAction` rows;
+  the ids live in `shared/panel-params.ts`), two `settingsSection` blocks
+  (`views/SettingsSections.tsx`) and `commandPaletteAction` rows;
   the popup is a portalled Popover + cmdk Command
   with plugin-owned ranking (`shared/model.ts`, `menuFor` for the branch
   context menu, `commitMenuFor` for the log's). Palette rows hand their
@@ -89,10 +98,13 @@ bb plugin reload vcs-widget   # after `bb plugin build` without `dev`
 ```
 
 Live click-through: `docs/VERIFY.md`, driven by `scripts/live-check.mjs`
-(M1), `scripts/live-check-m2.mjs` (M2), `scripts/live-check-m3.mjs` (M3)
-and `scripts/live-check-m4.mjs` (M4) on `scripts/live-lib.mjs` (system
+(M1), `scripts/live-check-m2.mjs` (M2), `scripts/live-check-m3.mjs` (M3),
+`scripts/live-check-m4.mjs` (M4) and `scripts/live-check-m5.mjs` (M5: the
+CLI, the settings sections, a 390 px pass) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
-unique per run, the scratch repo is reused).
+unique per run, the scratch repo is reused). `scripts/screenshots.mjs`
+regenerates `docs/screenshots/*.png` for the README; with no repository
+argument it touches no git.
 
 Vendor UI with `npx shadcn add @bb/<name>` (registry pinned in
 `components.json`); components live in `components/ui/` and are ours to edit.
@@ -117,10 +129,12 @@ Styling is Tailwind against host theme tokens only.
   the previewed argv or answers `no_upstream` / `head_changed`; it never
   upgrades or redirects a push. The lease is only ever the sha the dialog
   showed.
-- No agent-callable mutation: the CLI and agent tool (milestone 5) are
-  read-only. The RPC route itself is bb's local-auth API and reachable by any
-  local process with a thread id; the plugin cannot enforce more than logging
-  each mutation with its thread id (README, "Safety model").
+- No agent-callable mutation: `bb vcs-widget` and `vcs_widget_status` are
+  read-only, and stay that way by construction — `server/cli.ts` is their only
+  path to the host and it knows two reads. The RPC route itself is bb's
+  local-auth API and reachable by any local process with a thread id; the
+  plugin cannot enforce more than logging each mutation with its thread id
+  (README, "Safety model").
 
 ## References
 

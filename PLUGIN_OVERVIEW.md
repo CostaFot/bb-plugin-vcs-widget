@@ -43,5 +43,8 @@ instead.
 
 ## For agents
 
-The plugin registers no agent tool and no CLI mutation. Agents keep using git
-in their own worktree; the popup is for the human.
+`bb vcs-widget status | branches | log` and the `vcs_widget_status` tool read
+the repository behind a thread, on the machine that owns the worktree. Both
+only read: no plugin command, flag or tool checks out, commits, pushes,
+rebases or deletes anything, and a bundled skill says so. Checkout, commit
+and push stay with the human at the popup, the Commit panel and the log.

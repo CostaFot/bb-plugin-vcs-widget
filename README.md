@@ -7,11 +7,12 @@ background fetch, pull and push; a Commit panel tab stages, previews and
 commits, and a Git Log tab walks the history, all running on the machine
 that owns the thread's worktree.
 
-Status: milestone 4 shipped (the git log panel: virtualised rows with ref
-badges, branch and message filters, a details drawer with per-file diffs,
-and cherry-pick, revert and reset behind confirms). `CLAUDE.md` has the
-architecture and the dev loop; the Linear project `bb-plugin-vcs-group`
-tracks the milestones.
+![The branch popup in a thread header](docs/screenshots/popup.png)
+
+Status: milestone 5 shipped, so the plugin is feature complete — the branch
+popup, the commit panel, the git log, a settings page, and a read-only
+`bb vcs-widget` command with a matching agent tool. `CLAUDE.md` has the
+architecture and the dev loop.
 
 ## Install for development
 
@@ -78,6 +79,10 @@ drive them.
   job, and changes made by an agent or a terminal reach open popups through
   bb's environment events and the host worker's own watch on the git dir.
 
+![The commit panel](docs/screenshots/commit.png)
+
+![The git log panel](docs/screenshots/log.png)
+
 ## Settings
 
 Under Settings → Installed plugins → VCS Widget:
@@ -89,6 +94,34 @@ Under Settings → Installed plugins → VCS Widget:
 - Prune on fetch (on)
 - Network operation timeout in seconds (600): fetch, pull, push and commit
   jobs are stopped after this long (commit counts because of hooks)
+
+Below the form, "Agent access" repeats what the plugin exposes outside the
+UI, and "Favourite branches" lists every starred branch with the machine and
+worktree it belongs to, with a Clear button per repository. Favourites are
+kept per machine and worktree, not per thread, which is the only place that
+is visible.
+
+![The plugin's settings page](docs/screenshots/settings.png)
+
+## From a terminal, or an agent
+
+`bb vcs-widget` reads the repository behind a thread. It runs on the machine
+that owns the worktree, so it answers for a thread whose workspace is on
+another machine, where `git` in the local shell would read the wrong disk.
+
+| Command | Prints |
+|---|---|
+| `bb vcs-widget status` | branch, upstream, working tree, a running fetch/pull/push |
+| `bb vcs-widget branches [--remote \| --all]` | branches with ahead/behind, upstream and worktree |
+| `bb vcs-widget log [--branch <name> \| --all] [--grep <text>]` | recent commits with their refs |
+
+`--thread <id>` reads another thread, `--json` prints the data instead of the
+table, `--limit <n>` sets the rows. A usage error exits 2, a thread with no
+git repository exits 1 and says which.
+
+Agents get the same three reads as the `vcs_widget_status` tool, and a
+bundled skill telling them the plugin cannot commit or push and that git
+changes are the human's to ask for.
 
 ## How push decides
 
@@ -187,14 +220,11 @@ means a path from `git status` can never turn into a glob or pathspec magic.
 - Command palette requests travel inside the plugin bundle's module scope,
   not in a window event payload, and obey the same enabled/busy guards as a
   click on the row.
-- No agent tool or CLI can mutate the repository: the plugin registers none.
-  The RPC endpoints behind the popup are bb's local-auth API, like every
-  other plugin's, so any local process with the browser's rights (including
-  an agent shell) can call them with a thread id, and a mutation on thread T
+- No agent tool or CLI can mutate the repository. `bb vcs-widget` and
+  `vcs_widget_status` reach exactly two of the host's reads, and there is no
+  argument that turns either into a write. The RPC endpoints behind the popup
+  are a different matter: they are bb's local-auth API, like every other
+  plugin's, so any local process with the browser's rights (including an
+  agent shell) can call them with a thread id, and a mutation on thread T
   runs on T's host. The plugin cannot close that from inside; it logs every
   mutation and every job with its thread id so misuse is at least visible.
-
-## Roadmap
-
-Milestone 5 is the settings UI, a read-only CLI and agent tool, and the
-release.

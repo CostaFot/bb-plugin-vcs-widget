@@ -181,12 +181,12 @@ export function ComparePanel({ threadId, params }: PanelProps) {
     <Frame
       header={
         <>
-          <Icon name="GitMerge" className="size-4 text-muted-foreground" />
+          <Icon name="GitMerge" className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 truncate font-medium">
             {base} <span className="text-muted-foreground">⇄</span> {target}
           </span>
           {result?.ok ? (
-            <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground" data-testid="vcs-compare-counts">
+            <span className="ml-auto min-w-0 truncate text-xs tabular-nums text-muted-foreground" data-testid="vcs-compare-counts">
               {target} +{result.aheadCount} · {base} +{result.behindCount}
             </span>
           ) : null}
@@ -276,7 +276,7 @@ export function DiffPanel({ threadId, params }: PanelProps) {
     <Frame
       header={
         <>
-          <Icon name="FileDiff" className="size-4 text-muted-foreground" />
+          <Icon name="FileDiff" className="size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 truncate font-medium">
             Working tree <span className="text-muted-foreground">vs</span> {ref}
           </span>

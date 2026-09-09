@@ -292,15 +292,15 @@ export function CommitPanel({ threadId }: PanelProps) {
   return (
     <div className="flex h-full min-h-0 flex-col text-sm" data-testid="vcs-commit-panel">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Icon name="Check" className="size-4 text-muted-foreground" />
-        <span className="font-medium">Commit</span>
+        <Icon name="Check" className="size-4 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 font-medium">Commit</span>
         <span className="min-w-0 truncate text-muted-foreground" data-testid="vcs-commit-branch">
           {label}
         </span>
-        <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground" data-testid="vcs-commit-counts">
+        <span className="ml-auto min-w-0 truncate text-xs tabular-nums text-muted-foreground" data-testid="vcs-commit-counts">
           {changes?.ok ? `${stagedCount} staged · ${files.length - stagedCount} unstaged` : ""}
         </span>
-        <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" aria-label="Refresh" onClick={refetch} disabled={loading}>
+        <Button type="button" variant="ghost" size="sm" className="h-6 w-6 shrink-0 p-0" aria-label="Refresh" onClick={refetch} disabled={loading}>
           <Icon name="ArrowReloadHorizontal" className={cn("size-3.5", loading && "animate-spin")} />
         </Button>
       </header>
@@ -377,7 +377,7 @@ export function CommitPanel({ threadId }: PanelProps) {
             Run Git hooks
           </label>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="submit" size="sm" disabled={!canCommit} data-testid="vcs-commit-button">
             {amend ? "Amend" : "Commit"}
           </Button>

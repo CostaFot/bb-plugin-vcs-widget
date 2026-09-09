@@ -3,28 +3,32 @@
 // worker's signals (job progress, file watch) to open app pages, and keeps
 // the favourites.
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { z } from "zod";
 import {
   hostContract,
   hostSignals,
   rpcContract,
   unavailableOverview,
   type ActionResult,
+  type FavouriteRepo,
   type GitError,
   type JobRealtimePayload,
   type JobStart,
   type Overview,
 } from "./contracts";
-import { isValidRemoteName } from "./shared/branch-name";
+import { MAX_BRANCH_NAME_LENGTH, isValidRemoteName } from "./shared/branch-name";
 import {
   CHANGED_CHANNEL,
   JOB_CHANNEL,
   JOB_TIMEOUT_SECONDS,
+  MAX_LOG_GREP_LENGTH,
   PULL_STRATEGIES,
   isPullStrategy,
   type ChangedPayload,
 } from "./shared/constants";
 import { hintFor } from "./shared/git-errors";
 import { createAfterMutation } from "./server/after-mutation";
+import { CLI_COMMANDS, CLI_NAME, CLI_SUMMARY, parseCli, runCli, runCommand, type CliReader } from "./server/cli";
 import { RepositoryUnavailableError, repositoryForThread, type RepositoryTarget } from "./server/repo-target";
 
 // app.tsx imports only the type of this contract.
@@ -33,6 +37,7 @@ export { rpcContract } from "./contracts";
 const RECENT_LIMIT = 8;
 /** Favourites are a small list; keep it well under the kv row cap. */
 const MAX_FAVOURITES = 200;
+const FAVOURITE_PREFIX = "fav:";
 
 const VERB: Record<string, string> = {
   checkout: "The checkout",
@@ -247,16 +252,33 @@ export default async function plugin(bb: BbPluginApi) {
     }
   }
 
+  /** `fav:<hostId>:<repoRoot>`; host ids carry no colon, worktree paths may. */
+  const favouriteKey = (hostId: string, repoRoot: string) => `${FAVOURITE_PREFIX}${hostId}:${repoRoot}`;
+
   async function favouritesKey(threadId: string): Promise<{ key: string } | { unavailable: string }> {
     const target = await resolveTarget(threadId);
     if ("unavailable" in target) return target;
     const known = repoByEnvironment.get(target.environmentId);
-    return { key: `fav:${target.hostId}:${known?.repoRoot ?? target.repoPath}` };
+    return { key: favouriteKey(target.hostId, known?.repoRoot ?? target.repoPath) };
   }
 
   async function readFavourites(key: string): Promise<string[]> {
     const stored = await bb.storage.kv.get<unknown>(key);
     return Array.isArray(stored) ? stored.filter((name): name is string => typeof name === "string") : [];
+  }
+
+  async function allFavourites(): Promise<FavouriteRepo[]> {
+    const keys = await bb.storage.kv.list(FAVOURITE_PREFIX);
+    const repos: FavouriteRepo[] = [];
+    for (const key of keys) {
+      const rest = key.slice(FAVOURITE_PREFIX.length);
+      const separator = rest.indexOf(":");
+      if (separator <= 0) continue;
+      const names = await readFavourites(key);
+      if (names.length === 0) continue;
+      repos.push({ hostId: rest.slice(0, separator), repoRoot: rest.slice(separator + 1), names });
+    }
+    return repos.sort((left, right) => left.repoRoot.localeCompare(right.repoRoot));
   }
 
   const readFailure = (error: GitError) => ({ ok: false as const, error });
@@ -474,6 +496,19 @@ export default async function plugin(bb: BbPluginApi) {
       return { names: await readFavourites(key.key) };
     },
 
+    async favouriteRepos() {
+      return { repos: await allFavourites() };
+    },
+
+    async clearFavourites({ hostId, repoRoot }) {
+      // The key is rebuilt here, so the caller can only ever address a
+      // favourites row of this plugin's own store.
+      await bb.storage.kv.delete(favouriteKey(hostId, repoRoot));
+      bb.log.info(`favourites cleared for ${hostId}:${repoRoot}`);
+      bb.realtime.publish(CHANGED_CHANNEL, { hostId, reason: "favourites" });
+      return { repos: await allFavourites() };
+    },
+
     async setFavourite({ threadId, name, favourite }) {
       const key = await favouritesKey(threadId);
       if ("unavailable" in key) return { names: [] };
@@ -487,6 +522,83 @@ export default async function plugin(bb: BbPluginApi) {
       const target = await resolveTarget(threadId);
       if (!("unavailable" in target)) changes.publish(target.environmentId, "favourites");
       return { names };
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // Read-only surfaces: `bb vcs-widget` and one agent tool. Both go through
+  // the same reader, which only ever calls the two reading host methods, so
+  // no argv and no model can reach a mutation (README, "Safety model").
+  // -------------------------------------------------------------------------
+
+  const cliReader: CliReader = {
+    async overview(threadId) {
+      const target = await resolveTarget(threadId);
+      if ("unavailable" in target) return unavailableOverview(target.unavailable);
+      const result = await host.call(
+        "overview",
+        { repoPath: target.repoPath, recentLimit: RECENT_LIMIT },
+        { hostId: target.hostId },
+      );
+      remember(target, result);
+      return result;
+    },
+    log(threadId, input) {
+      return withReadTarget(
+        threadId,
+        (repo) => host.call("log", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }),
+        readFailure,
+      );
+    },
+  };
+
+  bb.cli.register({
+    name: CLI_NAME,
+    summary: CLI_SUMMARY,
+    commands: CLI_COMMANDS,
+    run: (argv, ctx) => runCli(argv, ctx.threadId, cliReader),
+  });
+
+  bb.agents.registerTool({
+    name: "vcs_widget_status",
+    description:
+      "Read the git state of this thread's worktree: the current branch and upstream, the working tree counts, the branch lists or the recent commits. Read-only — it cannot check out, commit, push or change anything.",
+    instructions:
+      "vcs_widget_status reads the same repository the user's VCS Widget popup shows. It cannot change git state, and neither can `bb vcs-widget`: checkout, commit, push, rebase and the rest are the human's to run from the popup, the Commit panel or the Git Log. Do not run `git` yourself to work around that unless the user asked for that change.",
+    presentation: {
+      label: { pending: "Reading the git state", completed: "Read the git state" },
+    },
+    parameters: z.object({
+      section: z
+        .enum(["status", "branches", "log"])
+        .default("status")
+        .describe("status: branch, upstream and working tree. branches: the branch lists. log: recent commits."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Rows for branches or log; defaults to 50 and 20."),
+      branch: z
+        .string()
+        .max(MAX_BRANCH_NAME_LENGTH)
+        .optional()
+        .describe("log: walk this local branch instead of the current one."),
+      grep: z.string().max(MAX_LOG_GREP_LENGTH).optional().describe("log: a literal substring of the commit message."),
+    }),
+    async execute({ section, limit, branch, grep }, { threadId }) {
+      const argv = [
+        section,
+        ...(limit === undefined ? [] : ["--limit", String(limit)]),
+        ...(branch === undefined ? [] : ["--branch", branch]),
+        ...(grep === undefined ? [] : ["--grep", grep]),
+      ];
+      const parsed = parseCli(argv);
+      if (!parsed.ok) return { content: [{ type: "text", text: parsed.message }], isError: true };
+      const result = await runCommand(parsed.command, threadId, cliReader);
+      const text = (result.stdout ?? result.stderr ?? "").trimEnd();
+      return { content: [{ type: "text", text: text === "" ? "No output." : text }], isError: result.exitCode !== 0 };
     },
   });
 

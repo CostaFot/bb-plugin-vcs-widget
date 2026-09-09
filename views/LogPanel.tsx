@@ -267,14 +267,14 @@ export function LogPanel({ threadId, params }: PanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col text-sm" data-testid="vcs-log-panel">
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <Icon name="Clock" className="size-4 shrink-0 text-muted-foreground" />
         <label className="sr-only" htmlFor={filterId}>
           Branch filter
         </label>
         <select
           id={filterId}
-          className="h-6 max-w-40 shrink-0 rounded border border-border bg-transparent px-1 text-xs"
+          className="h-6 min-w-20 max-w-36 rounded border border-border bg-transparent px-1 text-xs"
           value={filterValue(filter)}
           onChange={(event) => onFilterChange(event.target.value)}
           data-testid="vcs-log-filter"
@@ -305,7 +305,7 @@ export function LogPanel({ threadId, params }: PanelProps) {
           placeholder="Filter messages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          className="h-6 min-w-0 flex-1 text-xs"
+          className="h-6 min-w-24 flex-1 text-xs"
           data-testid="vcs-log-search"
         />
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground" data-testid="vcs-log-count">

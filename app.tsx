@@ -1,7 +1,8 @@
 // VCS Widget frontend: a branch button in every thread header that opens the
 // Git branches popup, command palette rows that open it or run one of its
-// quick actions, and four side-panel tabs: compare branches and diff with
-// the working tree (from the context menu), the commit dialog and the log.
+// quick actions, four side-panel tabs (compare branches and diff with the
+// working tree from the context menu, the commit dialog and the log), and two
+// blocks on the plugin's settings page.
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { requestOpen } from "./lib/events";
 import type { QuickActionId } from "./shared/model";
@@ -10,6 +11,7 @@ import { BranchButton } from "./views/BranchButton";
 import { CommitPanel } from "./views/CommitPanel";
 import { LogPanel } from "./views/LogPanel";
 import { ComparePanel, DiffPanel } from "./views/panels";
+import { AgentAccessSection, FavouritesSection } from "./views/SettingsSections";
 import "./app.css";
 
 const PALETTE_ROWS: { id: string; title: string; action: QuickActionId | null }[] = [
@@ -60,6 +62,20 @@ export default definePluginApp((app) => {
     icon: "Clock",
     component: LogPanel,
     layout: "flush",
+  });
+
+  app.slots.settingsSection({
+    id: "agent-access",
+    title: "Agent access",
+    description: "What this plugin exposes to agents and to a terminal.",
+    component: AgentAccessSection,
+  });
+
+  app.slots.settingsSection({
+    id: "favourites",
+    title: "Favourite branches",
+    description: "Starred branches, kept per machine and worktree rather than per thread.",
+    component: FavouritesSection,
   });
 
   for (const row of PALETTE_ROWS) {

@@ -9,6 +9,7 @@ import {
   discardPlanFor,
   discardPlans,
   entryKey,
+  favouriteLabel,
   stageState,
   statusLetter,
   filterAndRank,
@@ -181,6 +182,14 @@ describe("groupBranches", () => {
   it("lists favourites in list order, local before remote, by their stable key", () => {
     const groups = groupBranches(overview(), new Set(["remote:origin/feature", "local:old", "local:missing"]));
     expect(groups.favourites.map(entryKey)).toEqual(["local:old", "remote:origin/feature"]);
+  });
+
+  it("reads a stored key back for the settings page", () => {
+    expect(favouriteLabel("local:main")).toEqual({ name: "main", kind: "local" });
+    expect(favouriteLabel("remote:origin/feature")).toEqual({ name: "origin/feature", kind: "remote" });
+    // A branch actually called "local:x" round-trips as itself, not as "x".
+    expect(favouriteLabel("local:local:x")).toEqual({ name: "local:x", kind: "local" });
+    expect(favouriteLabel("something-else")).toEqual({ name: "something-else", kind: "unknown" });
   });
 });
 

@@ -37,7 +37,9 @@ export function ConfirmStep({ request, onCancel, onConfirm }: ConfirmStepProps) 
         if (!open) onCancel();
       }}
     >
-      <AlertDialogContent className="max-w-md">
+      {/* A phone keeps a margin, and a long command scrolls inside the dialog
+          rather than pushing the buttons off screen. */}
+      <AlertDialogContent className="max-h-[85dvh] w-[calc(100vw-2rem)] max-w-md overflow-y-auto">
         <AlertDialogHeader>
           <AlertDialogTitle>{request?.title ?? ""}</AlertDialogTitle>
           <AlertDialogDescription>{request?.description ?? ""}</AlertDialogDescription>

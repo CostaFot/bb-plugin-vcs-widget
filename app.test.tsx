@@ -187,6 +187,8 @@ function render(options: {
           favourites = input.favourite ? [...favourites, input.name] : favourites.filter((name) => name !== input.name);
           return { names: favourites };
         },
+        favouriteRepos: () => ({ repos: [] }),
+        clearFavourites: () => ({ repos: [] }),
         changes: () => CHANGES,
         diffFile: (input) => ({ ok: true, path: input.path, side: input.side, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: { old: { path: input.path, content: "a\n" }, new: { path: input.path, content: "b\n" } } }),
         stage: (input) => ({ ok: true, message: `Staged ${input.paths.length} file(s).`, overview: view }),
@@ -1067,5 +1069,48 @@ describe("LogPanel", () => {
     // The repeated commit arrives once.
     expect(slot.container.querySelectorAll(`[data-sha="${"a".repeat(40)}"]`)).toHaveLength(1);
     expect(slot.inspection.rpcCalls.at(-1)?.input).toMatchObject({ skip: 1 });
+  });
+});
+
+describe("settings sections", () => {
+  function renderSettings(id: string, rpc: Record<string, unknown> = {}) {
+    const section = app.settingsSections.find((entry) => entry.id === id)!;
+    return renderSlot<Record<string, never>, typeof rpcContract>(section, {}, { rpc: rpc as never });
+  }
+
+  it("registers both sections with a heading of their own", () => {
+    expect(app.settingsSections.map((section) => section.id)).toEqual(["agent-access", "favourites"]);
+    expect(app.settingsSections[0]?.title).toBe("Agent access");
+  });
+
+  it("names the read-only surfaces an agent can reach", () => {
+    const slot = renderSettings("agent-access");
+    expect(slot.getByText("bb vcs-widget status")).toBeTruthy();
+    expect(slot.getByText("vcs_widget_status")).toBeTruthy();
+    expect(slot.container.textContent).toContain("Both only read");
+  });
+
+  it("says where favourites come from when there are none", async () => {
+    const slot = renderSettings("favourites", { favouriteRepos: () => ({ repos: [] }) });
+    expect(await slot.findByText(/No favourites yet/u)).toBeTruthy();
+  });
+
+  it("lists a repository's favourites and clears them", async () => {
+    const user = userEvent.setup();
+    let repos = [{ hostId: "h1", repoRoot: "/repo", names: ["local:main", "remote:origin/feature"] }];
+    const slot = renderSettings("favourites", {
+      favouriteRepos: () => ({ repos }),
+      clearFavourites: (input: { hostId: string; repoRoot: string }) => {
+        repos = repos.filter((repo) => repo.hostId !== input.hostId || repo.repoRoot !== input.repoRoot);
+        return { repos };
+      },
+    });
+    expect(await slot.findByText("/repo")).toBeTruthy();
+    // The stored key is `local:main`; the row shows the branch.
+    expect(slot.getByText("main")).toBeTruthy();
+    expect(slot.getByText("origin/feature")).toBeTruthy();
+    await user.click(slot.getByRole("button", { name: "Clear" }));
+    expect(await slot.findByText(/No favourites yet/u)).toBeTruthy();
+    expect(slot.inspection.rpcCalls.at(-1)).toMatchObject({ method: "clearFavourites", input: { hostId: "h1", repoRoot: "/repo" } });
   });
 });

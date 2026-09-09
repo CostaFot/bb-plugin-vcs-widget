@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-vcs-widget",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "IntelliJ-style Git branches popup, commit dialog and log for bb.",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,7 @@
     "server": "./server.ts",
     "app": "./app.tsx",
     "host": "./host.ts",
-    "skills": []
+    "skills": ["skills"]
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.3",

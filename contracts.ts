@@ -563,6 +563,17 @@ const diffFileFields = { path: repoFilePathSchema, oldPath: repoFilePathSchema.n
 const threadInput = z.object({ threadId: z.string().min(1) });
 const favouriteNames = z.object({ names: z.array(z.string()) }).strict();
 
+/**
+ * The settings page has no thread, so it addresses a favourites list by the
+ * machine and worktree it belongs to. The server rebuilds its own kv key from
+ * these two fields; a caller never names a storage key.
+ */
+const favouriteRepoSchema = z
+  .object({ hostId: z.string().min(1), repoRoot: z.string().min(1), names: z.array(z.string()) })
+  .strict();
+const favouriteRepos = z.object({ repos: z.array(favouriteRepoSchema) }).strict();
+const favouriteRepoInput = z.object({ hostId: z.string().min(1).max(256), repoRoot: z.string().min(1).max(4096) }).strict();
+
 export const rpcContract = defineRpcContract({
   overview: {
     input: threadInput.strict(),
@@ -692,6 +703,15 @@ export const rpcContract = defineRpcContract({
   setFavourite: {
     input: threadInput.extend({ name: z.string().min(1).max(512), favourite: z.boolean() }).strict(),
     output: favouriteNames,
+  },
+  /** Every stored favourites list, for the settings page. */
+  favouriteRepos: {
+    input: z.object({}).strict(),
+    output: favouriteRepos,
+  },
+  clearFavourites: {
+    input: favouriteRepoInput,
+    output: favouriteRepos,
   },
   changes: {
     input: threadInput.strict(),
@@ -916,6 +936,7 @@ export type CommitInput = { message: string; amend: boolean; signoff: boolean; n
 export type HostSignals = typeof hostSignals;
 export type JobEventSignal = z.infer<HostSignals["jobEvent"]["payload"]>;
 export type ChangedSignal = z.infer<HostSignals["changed"]["payload"]>;
+export type FavouriteRepo = z.infer<typeof favouriteRepoSchema>;
 
 /** What the server publishes on the `job` realtime channel. */
 export interface JobRealtimePayload {

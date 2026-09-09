@@ -40,7 +40,13 @@ VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m3.mjs /tmp/vcs-scratch
 VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m4.mjs /tmp/vcs-scratch
+VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
+  node scripts/live-check-m5.mjs /tmp/vcs-scratch
 ```
+
+Milestone 5 also needs `bb` on `PATH`: it runs the plugin's own command
+against `VCS_E2E_THREAD` and compares the output with git in the scratch
+repository.
 
 Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
 (default `/usr/bin/chromium`). Screenshots land in `/tmp/vcs-e2e/`.
@@ -195,15 +201,55 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
     a click.
 12. The palette lists eight `VCS Widget:` rows.
 
+## Milestone 5 scenarios (`live-check-m5.mjs`)
+
+1. `status` names the repository, the branch and its upstream.
+2. `status` counts a dirty working tree (one unstaged, one untracked).
+3. `branches --all` marks the current branch with `*` and lists the remote
+   ones under their own heading.
+4. `log --branch <name>` walks that branch and starts at its head.
+5. `log --grep` is a literal filter: one commit, matched by subject.
+6. `--json` prints bounded data: `branchCounts`, never the branch arrays,
+   so a repository with thousands of branches cannot blow the CLI's output
+   cap.
+7. There is no mutating command: `checkout` is unknown. A usage error exits
+   2, a thread with no repository exits 1 with the reason.
+8. The settings page (`/settings/plugins/vcs-widget`) shows bb's own form
+   plus both plugin sections.
+9. "Agent access" names `bb vcs-widget status`, `vcs_widget_status` and the
+   read-only promise.
+10. "Favourite branches" lists the worktree whose branch the popup starred,
+    and Clear empties it.
+11. At 390 px the branch button is icon-only.
+12. The popup stays inside the viewport at 390 px, as a bottom sheet.
+13. The commit panel does not overflow at 390 px.
+14. The log panel does not overflow at 390 px.
+
+Manual, on top of the script:
+
+15. The `vcs_widget_status` tool: ask an agent on a thread for the branch
+    state; the row reads "Reading the git state" and the answer matches
+    `bb vcs-widget status`.
+16. `bb skill list` shows the `vcs-widget` plugin skill.
+17. `bb plugin list --json` shows `statusDetail: null` with the `skill` and
+    `agent-tool` capabilities: a rejected tool registration would say so
+    there.
+
 ## Last run
 
 2026-09-09, bb 0.42.1, git 2.55, one local machine: milestone 1 scenarios
 1 to 12 (27 steps), milestone 2 scenarios 1 to 19 (21 steps), milestone 3
-scenarios 1 to 14 (16 steps) and milestone 4 scenarios 1 to 12 (12 steps)
-pass headlessly (see the COS-121 to COS-124 comments). Scenario 13 of
-milestone 1 waits for a remote machine (COS-126). The milestone 1 push step
-once failed to reopen the popup after a cancelled dialog and passed on the
-rerun (COS-127).
+scenarios 1 to 14 (16 steps), milestone 4 scenarios 1 to 12 (12 steps) and
+milestone 5 scenarios 1 to 14 pass headlessly (see the COS-121 to COS-125
+comments). Scenario 13 of milestone 1 waits for a remote machine (COS-126).
+The milestone 1 push step once failed to reopen the popup after a cancelled
+dialog and passed on the rerun (COS-127).
+
+Milestone 5's first run failed on the settings page because it looked for it
+at `/extensions/plugins/<id>`, which is the marketplace page; the plugin's
+settings live at `/settings/plugins/<id>`. It also could not reopen the
+popup behind an open panel tab at 390 px, so each panel check now starts
+from a reloaded thread page.
 
 Milestone 4 first ran with milestone 2 stopping at scenario 10: the log row
 made the branch context menu one row taller, so it no longer fitted below

@@ -413,6 +413,17 @@ export function entryKey(entry: BranchEntry): string {
   return `${entry.kind}:${entry.branch.name}`;
 }
 
+/**
+ * The reverse, for the settings page, which lists stored keys without an
+ * overview to match them against. A key from an older version that fits
+ * neither prefix is shown as it was stored rather than dropped.
+ */
+export function favouriteLabel(key: string): { name: string; kind: "local" | "remote" | "unknown" } {
+  if (key.startsWith("local:")) return { name: key.slice("local:".length), kind: "local" };
+  if (key.startsWith("remote:")) return { name: key.slice("remote:".length), kind: "remote" };
+  return { name: key, kind: "unknown" };
+}
+
 export interface BranchGroups {
   favourites: BranchEntry[];
   recent: LocalBranch[];

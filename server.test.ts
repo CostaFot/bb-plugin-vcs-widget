@@ -417,6 +417,29 @@ describe("server", () => {
     expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { environmentId: "env1", reason: "favourites" } });
   });
 
+  it("lists every stored favourites list for the settings page and clears one", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    await bb.storage.kv.set("fav:h1:/repo", ["local:main"]);
+    await bb.storage.kv.set("fav:h2:/other/work tree", ["remote:origin/x"]);
+    // An emptied list and a key from something else are not repositories.
+    await bb.storage.kv.set("fav:h3:/gone", []);
+    await bb.storage.kv.set("panel:h1", ["not a favourite"]);
+
+    expect(await harness.behavior.callRpc("favouriteRepos", {})).toEqual({
+      repos: [
+        { hostId: "h2", repoRoot: "/other/work tree", names: ["remote:origin/x"] },
+        { hostId: "h1", repoRoot: "/repo", names: ["local:main"] },
+      ],
+    });
+
+    expect(await harness.behavior.callRpc("clearFavourites", { hostId: "h1", repoRoot: "/repo" })).toEqual({
+      repos: [{ hostId: "h2", repoRoot: "/other/work tree", names: ["remote:origin/x"] }],
+    });
+    expect(await bb.storage.kv.get("fav:h1:/repo")).toBeUndefined();
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { hostId: "h1", reason: "favourites" } });
+  });
+
   it("fails the jobs it started when the host worker exits", async () => {
     const { bb, harness } = setup();
     await plugin(bb);
@@ -427,6 +450,67 @@ describe("server", () => {
       payload: { environmentId: "env1", jobId: "job-push", event: { kind: "finished", result: { ok: false, error: { code: "git_failed" } } } },
     });
     expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { hostId: "h1", reason: "worker-exit" } });
+  });
+
+  it("registers a read-only CLI whose commands only read", async () => {
+    const { bb, harness, hostCalls } = setup();
+    await plugin(bb);
+    expect(harness.registrations.cli?.name).toBe("vcs-widget");
+    expect(harness.registrations.cli?.commands.map((command) => command.name)).toEqual(["status", "branches", "log"]);
+
+    const status = await harness.behavior.runCli(["status"], { threadId: "t1" });
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("Repository: repo (/repo)");
+
+    const log = await harness.behavior.runCli(["log", "--limit", "1", "--json"], { threadId: "t1" });
+    expect(JSON.parse(log.stdout)).toMatchObject({ commits: [{ shortSha: "abc1234" }] });
+
+    expect(hostCalls.map((call) => call.method)).toEqual(["overview", "log"]);
+  });
+
+  it("takes the thread from --thread when the CLI was not called on one", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    expect((await harness.behavior.runCli(["status"], {})).exitCode).toBe(2);
+    expect((await harness.behavior.runCli(["status", "--thread", "t1"], {})).exitCode).toBe(0);
+  });
+
+  it("reports a thread without a repository as an exit code, not a crash", async () => {
+    const { bb, harness, hostCalls } = setup({ environment: null });
+    await plugin(bb);
+    const result = await harness.behavior.runCli(["branches"], { threadId: "t1" });
+    expect(result).toMatchObject({ exitCode: 1, stderr: "This thread has no project environment.\n" });
+    expect(hostCalls).toEqual([]);
+  });
+
+  it("answers the agent tool from the same reads and never mutates", async () => {
+    const { bb, harness, hostCalls } = setup();
+    await plugin(bb);
+    const tool = harness.registrations.agentTools.find((entry) => entry.name === "vcs_widget_status");
+    expect(tool).toBeDefined();
+    expect(tool?.instructions).toContain("cannot change git state");
+
+    const status = await harness.behavior.callAgentTool("vcs_widget_status", {}, { threadId: "t1" });
+    expect(status).toMatchObject({ isError: false });
+    expect(JSON.stringify(status)).toContain("Repository: repo (/repo)");
+
+    const branches = await harness.behavior.callAgentTool("vcs_widget_status", { section: "branches" }, { threadId: "t1" });
+    expect(JSON.stringify(branches)).toContain("Local branches (1)");
+
+    expect(hostCalls.map((call) => call.method)).toEqual(["overview", "overview"]);
+  });
+
+  it("turns a branch name git would refuse into a tool error, not a git call", async () => {
+    const { bb, harness, hostCalls } = setup();
+    await plugin(bb);
+    const result = await harness.behavior.callAgentTool(
+      "vcs_widget_status",
+      { section: "log", branch: "bad name" },
+      { threadId: "t1" },
+    );
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.stringify(result)).toContain("not a valid git branch name");
+    expect(hostCalls).toEqual([]);
   });
 
   it("disposes timers and the subscription cleanly", async () => {
