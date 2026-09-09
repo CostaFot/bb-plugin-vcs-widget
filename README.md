@@ -16,7 +16,7 @@ IntelliJ-style VCS popup, commit dialog and log, inside bb.
 bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 ```
 
-## The branch popup
+## Popup
 
 ![The branch popup open under the thread header](docs/screenshots/popup.png)
 
@@ -37,7 +37,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 - A conflict banner with Abort while a merge, rebase, cherry-pick or revert is
   in progress.
 
-## The commit panel
+## Commit panel
 
 ![The commit panel with a file selected](docs/screenshots/commit.png)
 
@@ -57,7 +57,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
   "LGTM - Commit & Push" to the thread as if you had typed it, so the agent that
   wrote the code writes the message.
 
-## The git log
+## Git log
 
 ![The git log panel with a commit selected](docs/screenshots/log.png)
 
@@ -71,7 +71,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
   Revert Commit, Reset Current Branch to Here (Soft / Mixed / Hard), Compare
   with current and Copy Revision Number.
 
-## The rest of it
+## More
 
 - Two more panel tabs: "Compare branches" (the commits only on either side, the
   changed files, the patch per file) and "Diff with working tree". Compare also
