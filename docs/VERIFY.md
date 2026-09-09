@@ -5,7 +5,8 @@ with a bare origin (including jobs, deadline, cancel and process-group kill,
 the file watch through the harness), the server against bb's fake plugin
 host, and the app under jsdom. This document is the click-through against a
 running bb: `scripts/live-check.mjs` for milestone 1, `scripts/live-check-m2.mjs`
-for milestone 2, both on `scripts/live-lib.mjs`.
+for milestone 2, `scripts/live-check-m3.mjs` for milestone 3, all on
+`scripts/live-lib.mjs`.
 
 ## Setup
 
@@ -35,6 +36,8 @@ VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check.mjs run /tmp/vcs-scratch
 VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m2.mjs /tmp/vcs-scratch
+VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
+  node scripts/live-check-m3.mjs /tmp/vcs-scratch
 ```
 
 Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
@@ -69,7 +72,7 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
    the Detached HEAD banner; `git switch main`: an open popup refreshes.
 9. Update Project after a commit pushed from the second clone: "Update
    Project: Fast-forward."
-10. Mod+Shift+P lists the six `VCS Group:` rows (bb adds a settings row);
+10. Mod+Shift+P lists the seven `VCS Group:` rows (bb adds a settings row);
     "Open branches" opens the popup; "Push..." shows the confirm dialog with
     the tracked refspec; a `vcs-group:open` CustomEvent dispatched from the
     console with a `detail` opens nothing.
@@ -117,13 +120,54 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
     refspec; the "force with lease" switch changes it to
     `--force-with-lease=refs/heads/main:<sha>`; the remote ends at HEAD.
 17. Delete on `origin/<b>` runs `push --delete` as a job.
-18. Six palette rows including Checkout Tag or Revision.
+18. Seven palette rows including Checkout Tag or Revision.
 19. With an unreachable extra remote, Fetch hangs; Cancel in the status line
     ends the job with "Fetch was cancelled."
+
+## Milestone 3 scenarios (`live-check-m3.mjs`)
+
+1. The popup's Actions group has `Commit...` with the Ctrl+K hint; clicking
+   it closes the popup and opens a "Commit" panel tab.
+2. A clean tree says "Nothing to commit: the working tree is clean."
+3. After an edit to `a.txt`, a staged edit plus a second edit to `b.txt`
+   and a new untracked file (from a terminal), the panel lists Changes (2)
+   and Unversioned files (1) with the status letters; the checkbox is the
+   staged state: `a.txt` unchecked, `b.txt` mixed, the new file unchecked.
+4. Ticking `a.txt` runs `git add` (status `M.`), unticking runs
+   `git reset -q --` (status `.M`).
+5. Selecting `b.txt` renders its patch in bb's diff viewer; the partially
+   staged file offers Staged / Unstaged and the switch reloads the diff.
+6. A message with a body and Commit: the toast names the sha and subject,
+   `git log -1 --format=%B` holds the message exactly (it travelled on
+   stdin), the box is cleared, `b.txt`'s unstaged part is still there.
+7. With nothing staged the Commit button is disabled and the status line
+   says "Nothing is staged: tick the files to include."
+8. Amend prefills HEAD's message; Amend previews `git commit -F - --amend`;
+   after confirming, HEAD's subject changed and its parent did not.
+9. Discard on the untracked file previews
+   `git --literal-pathspecs clean -f -- <file>`, the dialog says "delete 1
+   file", Cancel keeps the file, Discard deletes it.
+10. Discard on `b.txt` previews
+    `git --literal-pathspecs restore --staged --worktree --source=HEAD -- b.txt`
+    and reverts it; discarding `a.txt` too leaves the list empty.
+11. With `core.hooksPath` pointing at a pre-commit hook that prints, sleeps
+    3 s, prints again and exits 1: Commit shows "Committing…" with the
+    hook's output line while the job runs, then "Commit failed: hook says
+    no" (the hook's last line) and HEAD is unchanged. With Run Git hooks
+    unticked the commit passes (`--no-verify`).
+12. An edit and a `git add` from a terminal reach the panel without a
+    click (the host watch on the git dir, bb's environment events).
+13. Commit and Push commits, then the push dialog previews
+    `git push --no-progress --end-of-options origin HEAD:refs/heads/main`;
+    after Push the bare remote's `main` equals HEAD.
+14. The palette lists seven `VCS Group:` rows; "Commit..." opens the panel
+    without opening the popup.
 
 ## Last run
 
 2026-09-09, bb 0.42.1, git 2.55, one local machine: milestone 1 scenarios
-1 to 12 and milestone 2 scenarios 1 to 19 pass headlessly (see the COS-121
-and COS-122 comments). Scenario 13 of milestone 1 waits for a remote
-machine.
+1 to 12 (27 steps), milestone 2 scenarios 1 to 19 (21 steps) and milestone
+3 scenarios 1 to 14 (16 steps) pass headlessly (see the COS-121, COS-122
+and COS-123 comments). Scenario 13 of milestone 1 waits for a remote
+machine (COS-126). The milestone 1 push step once failed to reopen the
+popup after a cancelled dialog and passed on the rerun (COS-127).

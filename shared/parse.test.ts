@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   gitVersionAtLeast,
+  parseCommitSummary,
   parseForEachRef,
   parseGitVersion,
   parseLeftRightCount,
   parseLog,
   parseNumstat,
   parseRecentFromReflog,
+  parseStatusEntries,
   parseStatusV2,
   parseTags,
   parseUpstreamTrack,
@@ -128,6 +130,51 @@ describe("parseStatusV2", () => {
       head: "main",
       oid: null,
     });
+  });
+});
+
+describe("parseStatusEntries", () => {
+  it("lists every entry with its two status letters, renames with the old path", () => {
+    const raw = [
+      "# branch.oid abc1234",
+      "# branch.head main",
+      "1 M. N... 100644 100644 100644 h1 h2 staged.txt",
+      "1 .M N... 100644 100644 100644 h1 h2 dir/with space.txt",
+      "1 MM N... 100644 100644 100644 h1 h2 both.txt",
+      "1 A. N... 000000 100644 100644 h1 h2 added.txt",
+      "1 .D N... 100644 100644 000000 h1 h2 deleted.txt",
+      "2 RM N... 100644 100644 100644 h1 h2 R100 new.txt",
+      "old.txt",
+      "u UU N... 100644 100644 100644 100644 h1 h2 h3 conflict.txt",
+      "? untracked.txt",
+      "! ignored.txt",
+      "",
+    ].join(NUL);
+    expect(parseStatusEntries(raw)).toEqual([
+      { path: "staged.txt", oldPath: null, index: "M", worktree: ".", kind: "tracked" },
+      { path: "dir/with space.txt", oldPath: null, index: ".", worktree: "M", kind: "tracked" },
+      { path: "both.txt", oldPath: null, index: "M", worktree: "M", kind: "tracked" },
+      { path: "added.txt", oldPath: null, index: "A", worktree: ".", kind: "tracked" },
+      { path: "deleted.txt", oldPath: null, index: ".", worktree: "D", kind: "tracked" },
+      { path: "new.txt", oldPath: "old.txt", index: "R", worktree: "M", kind: "tracked" },
+      { path: "conflict.txt", oldPath: null, index: "U", worktree: "U", kind: "conflicted" },
+      { path: "untracked.txt", oldPath: null, index: ".", worktree: "?", kind: "untracked" },
+    ]);
+  });
+
+  it("returns nothing for a clean tree", () => {
+    expect(parseStatusEntries(["# branch.oid abc", "# branch.head main", ""].join(NUL))).toEqual([]);
+    expect(parseStatusEntries("")).toEqual([]);
+  });
+});
+
+describe("parseCommitSummary", () => {
+  it("reads the branch, sha and subject of git commit's summary line", () => {
+    expect(parseCommitSummary("[main 1a2b3c4] Fix the thing\n 1 file changed, 1 insertion(+)\n")).toEqual({ branch: "main", sha: "1a2b3c4", subject: "Fix the thing" });
+    expect(parseCommitSummary("[main (root-commit) 1a2b3c4] first\n")).toEqual({ branch: "main", sha: "1a2b3c4", subject: "first" });
+    expect(parseCommitSummary("[detached HEAD 1a2b3c4] on a sha\n")).toEqual({ branch: "detached HEAD", sha: "1a2b3c4", subject: "on a sha" });
+    expect(parseCommitSummary("[feat/x (merge) 1a2b3c4] Merge it\n")).toEqual({ branch: "feat/x", sha: "1a2b3c4", subject: "Merge it" });
+    expect(parseCommitSummary("On branch main\nnothing to commit\n")).toBeNull();
   });
 });
 

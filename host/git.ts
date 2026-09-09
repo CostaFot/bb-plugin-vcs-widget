@@ -17,6 +17,8 @@ export interface GitRunOptions {
   env?: Record<string, string>;
   /** Receives every stdout and stderr chunk as it arrives (jobs stream progress). */
   onOutput?: (chunk: string) => void;
+  /** Written to git's stdin, then closed (`commit -F -`). Undefined leaves stdin closed. */
+  stdin?: string;
 }
 
 export interface GitRunResult {
@@ -71,10 +73,16 @@ export function runGit(args: readonly string[], options: GitRunOptions): Promise
     const child = spawn("git", argv, {
       cwd: options.cwd,
       env: gitEnv(options.env),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: useProcessGroups,
       windowsHide: true,
     });
+    if (options.stdin !== undefined && child.stdin) {
+      // git may exit before reading everything (a failed pre-flight of its
+      // own); an EPIPE then must not surface as an unhandled error.
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(options.stdin);
+    }
 
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];

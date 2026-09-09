@@ -25,7 +25,7 @@ export interface BranchButtonProps {
 }
 
 /** Panel tabs this plugin registers in app.tsx. */
-export const PANEL_ACTION = { compare: "compare", diff: "diff" } as const;
+export const PANEL_ACTION = { compare: "compare", diff: "diff", commit: "commit" } as const;
 
 /**
  * The thread-header control: a 28 px branch button that opens the Git
@@ -70,16 +70,31 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
     setOpen(true);
   }, [clearStatus, refetch, refetchFavourites]);
 
+  const openPanel = useCallback(
+    (actionId: string, title: string, params: Record<string, unknown>) => {
+      setOpen(false);
+      const opened = navigate.openThreadPanel({ actionId, title, params: params as never });
+      if (!opened) toast.error("The side panel is not available here.");
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     const handler = () => {
       const request = takeOpenRequest(threadId);
       if (request === null) return;
+      // The commit dialog is a panel tab; the palette row goes straight
+      // there instead of flashing the popup.
+      if (request.action === "commit") {
+        openPanel(PANEL_ACTION.commit, "Commit", {});
+        return;
+      }
       openPopup();
       if (request.action) setPendingAction(request.action);
     };
     window.addEventListener(OPEN_EVENT, handler);
     return () => window.removeEventListener(OPEN_EVENT, handler);
-  }, [openPopup, threadId]);
+  }, [openPanel, openPopup, threadId]);
 
   // A confirm dialog replaces the popup, as IntelliJ's push dialog does.
   useEffect(() => {
@@ -106,6 +121,9 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
       case "update":
         actions.update();
         return;
+      case "commit":
+        openPanel(PANEL_ACTION.commit, "Commit", {});
+        return;
       case "fetch":
         void actions.fetch();
         return;
@@ -116,12 +134,6 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
       case "checkout-revision":
         return; // handled inside the popup
     }
-  };
-
-  const openPanel = (actionId: string, title: string, params: Record<string, unknown>) => {
-    setOpen(false);
-    const opened = navigate.openThreadPanel({ actionId, title, params: params as never });
-    if (!opened) toast.error("The side panel is not available here.");
   };
 
   const onMenu = (itemId: BranchMenuItemId, entry: BranchEntry, extra?: MenuExtra) => {

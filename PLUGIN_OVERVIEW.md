@@ -13,6 +13,10 @@ header.
   Push, Tracked Branch, Rename, Delete, favourites, copy.
 - **Background fetch, pull and push** with progress and Cancel, so a slow
   remote never hits bb's host-call deadline.
+- **A commit dialog** as a panel tab: the working tree as a checklist whose
+  checkbox is the staged state, a diff preview with expand-context, message,
+  Amend, Sign-off, Run Git hooks, Commit and Commit and Push, and a
+  per-file Discard that always asks first.
 - **Side panel tabs** that compare two branches or diff the working tree
   against a branch, rendered with bb's own diff viewer.
 - **Command palette rows** for the quick actions on thread routes.
@@ -24,9 +28,11 @@ header.
 
 Git runs only as an argv on the plugin's host worker on the machine that
 owns the worktree, never through a shell. Every push, merge, rebase, delete,
-worktree and detached checkout shows the exact command first and runs
-exactly that or refuses with a typed reason; force push exists only as
-`--force-with-lease` against the sha the dialog showed. Nothing mutates
+worktree, detached checkout, amend and discard shows the exact command first
+and runs exactly that or refuses with a typed reason; force push exists only
+as `--force-with-lease` against the sha the dialog showed. Commit messages
+travel on git's stdin, and paths only ever reach git after
+`--literal-pathspecs ... --`. Nothing mutates
 while the index is locked or a merge or rebase is in progress; the popup
 offers Abort instead.
 

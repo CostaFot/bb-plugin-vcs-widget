@@ -92,7 +92,7 @@ function setup(options: {
   return { bb, harness, hostCalls, subscriptions, released };
 }
 
-const JOB_METHODS = new Set(["fetch", "pull", "push", "updateBranch", "deleteRemoteBranch"]);
+const JOB_METHODS = new Set(["fetch", "pull", "push", "updateBranch", "deleteRemoteBranch", "commit"]);
 
 function defaultHostResult(call: HostCall): unknown {
   if (call.method === "overview") return overview();
@@ -103,6 +103,8 @@ function defaultHostResult(call: HostCall): unknown {
   if (call.method === "jobGet") return null;
   if (call.method === "jobCancel") return { cancelled: true };
   if (call.method === "listTags") return { ok: true, tags: [], truncated: false };
+  if (call.method === "changes") return { ok: true, head: { kind: "branch", name: "main", sha: "abc1234" }, operation: "none", indexLocked: false, files: [{ path: "a.txt", oldPath: null, index: ".", worktree: "M", kind: "tracked" }], truncated: false, lastCommit: null };
+  if (call.method === "diffFile") return { ok: true, path: "a.txt", side: "worktree", patch: "", truncated: false, binary: false, contents: null };
   if (call.method === "compare") return { ok: true, base: "main", target: "feature", aheadCount: 0, behindCount: 0, ahead: [], behind: [], files: [], truncated: { ahead: false, behind: false, files: false } };
   const result: ActionResult = { ok: true, message: `${call.method} done`, overview: overview() };
   return result;
@@ -339,6 +341,28 @@ describe("server", () => {
     await plugin(unavailable.bb);
     expect(await unavailable.harness.behavior.callRpc("jobGet", { threadId: "t1", jobId: "j1" })).toBeNull();
     expect(await unavailable.harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null })).toMatchObject({ ok: false, error: { code: "not_a_repo" } });
+  });
+
+  it("forwards the commit panel: reads, index mutations with a change publish, and commit as a job", async () => {
+    const { bb, harness, hostCalls } = setup({ settings: { jobTimeoutSeconds: 120 } });
+    await plugin(bb);
+    const changes = await harness.behavior.callRpc("changes", { threadId: "t1" });
+    expect(changes).toMatchObject({ ok: true, files: [{ path: "a.txt" }] });
+    await harness.behavior.callRpc("diffFile", { threadId: "t1", path: "a.txt", oldPath: null, side: "worktree" });
+    const staged = (await harness.behavior.callRpc("stage", { threadId: "t1", paths: ["a.txt"] })) as ActionResult;
+    expect(staged.ok).toBe(true);
+    expect(harness.realtimeSignals).toContainEqual({ channel: "changed", payload: { environmentId: "env1", reason: "stage" } });
+    await harness.behavior.callRpc("unstage", { threadId: "t1", paths: ["a.txt"] });
+    await harness.behavior.callRpc("discard", { threadId: "t1", restore: ["a.txt"], remove: [], clean: ["junk"] });
+    const started = (await harness.behavior.callRpc("commit", { threadId: "t1", message: "Subject\n\nBody", amend: false, signoff: true, noVerify: false })) as JobStart;
+    expect(started).toMatchObject({ ok: true, kind: "commit" });
+    expect(hostCalls.map((call) => call.method)).toEqual(["changes", "diffFile", "stage", "unstage", "discard", "commit"]);
+    expect(hostCalls[1]?.input).toEqual({ repoPath: "/repo", path: "a.txt", oldPath: null, side: "worktree" });
+    expect(hostCalls[2]?.input).toEqual({ repoPath: "/repo", paths: ["a.txt"] });
+    expect(hostCalls[4]?.input).toEqual({ repoPath: "/repo", restore: ["a.txt"], remove: [], clean: ["junk"] });
+    expect(hostCalls[5]?.input).toEqual({ repoPath: "/repo", message: "Subject\n\nBody", amend: false, signoff: true, noVerify: false, timeoutMs: 120_000 });
+    await expect(harness.behavior.callRpc("commit", { threadId: "t1", message: "   ", amend: false, signoff: false, noVerify: false })).rejects.toThrow();
+    await expect(harness.behavior.callRpc("stage", { threadId: "t1", paths: ["/etc/passwd"] })).rejects.toThrow();
   });
 
   it("keeps favourites per host and repository in kv and tells other panes", async () => {

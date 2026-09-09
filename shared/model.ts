@@ -2,7 +2,7 @@
 // the exact git argv each action runs. The host builds its argv through
 // `gitArgvFor`, and the confirm dialog previews the same argv, so the two can
 // never drift.
-import type { BranchRef, LocalBranch, Operation, Overview, PullStrategy, RemoteBranch } from "../contracts";
+import type { BranchRef, ChangeEntry, ChangesResult, LocalBranch, Operation, Overview, PullStrategy, RemoteBranch } from "../contracts";
 import { isValidRemoteName } from "./branch-name";
 import { MIN_GIT_VERSION } from "./constants";
 import { gitVersionAtLeast, splitRemoteRef } from "./parse";
@@ -40,6 +40,14 @@ export type GitPlan =
   | { op: "set-upstream"; branch: string; upstream: string | null }
   | { op: "worktree-add"; path: string; branch: string }
   | { op: "worktree-add-track"; path: string; remote: string; branch: string }
+  // Path commands run under --literal-pathspecs: no globbing, no magic.
+  | { op: "stage"; paths: readonly string[] }
+  | { op: "unstage"; paths: readonly string[] }
+  | { op: "restore-head"; paths: readonly string[] }
+  | { op: "rm-cached"; paths: readonly string[] }
+  | { op: "clean"; paths: readonly string[] }
+  /** The message goes on stdin (`-F -`); it is never an argument. */
+  | { op: "commit"; amend: boolean; signoff: boolean; noVerify: boolean }
   | PushPlan;
 
 /** The full ref a popup entry stands for; tags cannot shadow it. */
@@ -115,6 +123,26 @@ export function gitArgvFor(plan: GitPlan): string[] {
       return ["worktree", "add", "--end-of-options", plan.path, plan.branch];
     case "worktree-add-track":
       return ["worktree", "add", "--track", "-b", plan.branch, "--end-of-options", plan.path, `refs/remotes/${plan.remote}/${plan.branch}`];
+    case "stage":
+      return ["--literal-pathspecs", "add", "-A", "--", ...plan.paths];
+    case "unstage":
+      // `reset` rather than `restore --staged`: it also works before the first commit.
+      return ["--literal-pathspecs", "reset", "-q", "--", ...plan.paths];
+    case "restore-head":
+      return ["--literal-pathspecs", "restore", "--staged", "--worktree", "--source=HEAD", "--", ...plan.paths];
+    case "rm-cached":
+      return ["--literal-pathspecs", "rm", "-q", "--cached", "--", ...plan.paths];
+    case "clean":
+      return ["--literal-pathspecs", "clean", "-f", "--", ...plan.paths];
+    case "commit":
+      return [
+        "commit",
+        "-F",
+        "-",
+        ...(plan.amend ? ["--amend"] : []),
+        ...(plan.signoff ? ["--signoff"] : []),
+        ...(plan.noVerify ? ["--no-verify"] : []),
+      ];
     case "push": {
       const source = plan.branch === null ? "HEAD" : `refs/heads/${plan.branch}`;
       if (plan.setUpstream) {
@@ -230,6 +258,108 @@ function quoteForDisplay(arg: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/u.test(arg) ? arg : `'${arg.replace(/'/gu, "'\\''")}'`;
 }
 
+// ---------------------------------------------------------------------------
+// Commit panel: what a status entry means and how to discard it
+// ---------------------------------------------------------------------------
+
+/** True when the index holds a version of the file that differs from HEAD. */
+export function isStaged(entry: ChangeEntry): boolean {
+  return entry.kind !== "untracked" && entry.index !== ".";
+}
+
+/** True when the working tree differs from the index (or the file is untracked). */
+export function hasUnstagedChange(entry: ChangeEntry): boolean {
+  return entry.kind === "untracked" || entry.worktree !== ".";
+}
+
+/** Checkbox state for a row: staged, unstaged, or a bit of both. */
+export function stageState(entry: ChangeEntry): "staged" | "unstaged" | "partial" {
+  const staged = isStaged(entry);
+  const unstaged = hasUnstagedChange(entry);
+  return staged && unstaged ? "partial" : staged ? "staged" : "unstaged";
+}
+
+/** Which sides of a change a diff can show, staged first. */
+export function diffSidesFor(entry: ChangeEntry): ("index" | "worktree")[] {
+  if (entry.kind === "untracked") return ["worktree"];
+  if (entry.kind === "conflicted") return ["worktree"];
+  const sides: ("index" | "worktree")[] = [];
+  if (entry.index !== ".") sides.push("index");
+  if (entry.worktree !== ".") sides.push("worktree");
+  return sides.length === 0 ? ["worktree"] : sides;
+}
+
+export interface DiscardPlan {
+  /** Tracked in HEAD: restored in the index and the working tree. */
+  restore: string[];
+  /** New to the index (added, copied, the new side of a rename): unstaged and kept on disk. */
+  remove: string[];
+  /** Untracked: deleted. */
+  clean: string[];
+  /** Conflicted entries cannot be discarded; listed so the dialog can say so. */
+  skipped: string[];
+}
+
+/**
+ * Sorts the selected entries into the three discard commands. Only the
+ * status letters decide: a path in HEAD is restored, a path that exists only
+ * in the index is unstaged (the file stays), an untracked file is deleted.
+ */
+export function discardPlanFor(entries: readonly ChangeEntry[]): DiscardPlan {
+  const plan: DiscardPlan = { restore: [], remove: [], clean: [], skipped: [] };
+  for (const entry of entries) {
+    if (entry.kind === "conflicted") {
+      plan.skipped.push(entry.path);
+    } else if (entry.kind === "untracked") {
+      plan.clean.push(entry.path);
+    } else if (entry.index === "R") {
+      if (entry.oldPath !== null) plan.restore.push(entry.oldPath);
+      plan.remove.push(entry.path);
+    } else if (entry.index === "A" || entry.index === "C" || (entry.index === "." && entry.worktree === "A")) {
+      plan.remove.push(entry.path);
+    } else {
+      plan.restore.push(entry.path);
+    }
+  }
+  return plan;
+}
+
+/** The git commands a discard plan runs, in order; empty categories are skipped. */
+export function discardPlans(plan: { restore: readonly string[]; remove: readonly string[]; clean: readonly string[] }): GitPlan[] {
+  const plans: GitPlan[] = [];
+  if (plan.restore.length > 0) plans.push({ op: "restore-head", paths: plan.restore });
+  if (plan.remove.length > 0) plans.push({ op: "rm-cached", paths: plan.remove });
+  if (plan.clean.length > 0) plans.push({ op: "clean", paths: plan.clean });
+  return plans;
+}
+
+/**
+ * Why the commit panel cannot commit right now; null when it can. An
+ * operation in progress does not block: committing is how a merge or a
+ * cherry-pick concludes once its conflicts are staged.
+ */
+export function commitBlockedReason(overview: Overview | null, changes: ChangesResult | null): string | null {
+  if (overview !== null) {
+    if (overview.unavailableReason !== null) return overview.unavailableReason;
+    if (gitTooOld(overview)) return `git ${overview.gitVersion ?? "?"} is too old; the plugin needs ${MIN_GIT_VERSION.major}.${MIN_GIT_VERSION.minor}.`;
+    if (overview.activeJob !== null) return `${JOB_VERB[overview.activeJob.kind] ?? "A job"} is running.`;
+  }
+  if (changes !== null && !changes.ok) return changes.error.message;
+  if (changes?.ok && changes.indexLocked) return "Another git process holds the index lock.";
+  if (changes?.ok) {
+    const conflicts = changes.files.filter((entry) => entry.kind === "conflicted").length;
+    if (conflicts > 0) return `${conflicts} conflicted file${conflicts === 1 ? "" : "s"}; resolve and stage them first.`;
+  }
+  return null;
+}
+
+/** IntelliJ's status colours: the letter shown next to a commit panel row. */
+export function statusLetter(entry: ChangeEntry): string {
+  if (entry.kind === "untracked") return "?";
+  if (entry.kind === "conflicted") return "U";
+  return entry.index !== "." ? entry.index : entry.worktree;
+}
+
 /**
  * IntelliJ's default: a sibling directory named after the repository and the
  * branch. `repoRoot` is a POSIX path from git; a Windows host prints forward
@@ -338,6 +468,7 @@ const JOB_VERB: Record<string, string> = {
   push: "A push",
   updateBranch: "An update",
   deleteRemoteBranch: "A remote delete",
+  commit: "A commit",
 };
 
 /** Why nothing may mutate the repository right now; null when it may. */
@@ -354,7 +485,7 @@ export function blockingReason(overview: Overview): string | null {
 // Labels (the IntelliJ strings) and quick actions
 // ---------------------------------------------------------------------------
 
-export type QuickActionId = "update" | "fetch" | "push" | "new-branch" | "checkout-revision";
+export type QuickActionId = "update" | "commit" | "fetch" | "push" | "new-branch" | "checkout-revision";
 
 export interface QuickAction {
   id: QuickActionId;
@@ -386,6 +517,9 @@ export function quickActionsFor(overview: Overview): QuickAction[] {
           : busyReason;
   return [
     { id: "update", label: "Update Project", hint: "Ctrl+T", ...disable(networkReason) },
+    // A commit is legal on a detached HEAD and as the first commit; only a
+    // blocked repository stops it.
+    { id: "commit", label: "Commit...", hint: "Ctrl+K", ...disable(unavailable ? overview.unavailableReason : busyReason) },
     {
       id: "fetch",
       label: "Fetch",
@@ -604,6 +738,12 @@ export function confirmTierFor(
     case "worktree-add-track":
     case "switch-detach":
       return "confirm";
+    case "restore-head":
+    case "rm-cached":
+    case "clean":
+      return "destructive";
+    case "commit":
+      return plan.amend ? "confirm" : "none";
     case "switch":
     case "switch-track":
     case "create":
@@ -611,6 +751,8 @@ export function confirmTierFor(
     case "fetch-branch":
     case "rename":
     case "set-upstream":
+    case "stage":
+    case "unstage":
       return "none";
   }
 }

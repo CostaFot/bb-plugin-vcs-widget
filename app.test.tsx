@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 afterEach(() => cleanup());
 import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
-import type { ActionResult, JobStart, Overview } from "./contracts";
+import type { ActionResult, ChangesResult, JobStart, Overview } from "./contracts";
 import type { JobKind } from "./shared/constants";
 import { unavailableOverview } from "./contracts";
 import { requestOpen } from "./lib/events";
@@ -187,11 +187,32 @@ function render(options: {
           favourites = input.favourite ? [...favourites, input.name] : favourites.filter((name) => name !== input.name);
           return { names: favourites };
         },
+        changes: () => CHANGES,
+        diffFile: (input) => ({ ok: true, path: input.path, side: input.side, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: { old: { path: input.path, content: "a\n" }, new: { path: input.path, content: "b\n" } } }),
+        stage: (input) => ({ ok: true, message: `Staged ${input.paths.length} file(s).`, overview: view }),
+        unstage: (input) => ({ ok: true, message: `Unstaged ${input.paths.length} file(s).`, overview: view }),
+        discard: () => ({ ok: true, message: "Discarded.", overview: view }),
+        commit: () => job("commit"),
         ...options.rpc,
       },
     },
   );
 }
+
+const CHANGES: ChangesResult = {
+  ok: true,
+  head: { kind: "branch", name: "main", sha: "abc1234" },
+  operation: "none",
+  indexLocked: false,
+  truncated: false,
+  lastCommit: { sha: "a".repeat(40), shortSha: "aaaaaaa", subject: "Last one", message: "Last one\n\nBody" },
+  files: [
+    { path: "staged.txt", oldPath: null, index: "M", worktree: ".", kind: "tracked" },
+    { path: "edited.txt", oldPath: null, index: ".", worktree: "M", kind: "tracked" },
+    { path: "both.txt", oldPath: null, index: "M", worktree: "M", kind: "tracked" },
+    { path: "new.txt", oldPath: null, index: ".", worktree: "?", kind: "untracked" },
+  ],
+};
 
 /** RPC methods called so far, without the favourites read that every open makes. */
 const methods = (slot: { inspection: { rpcCalls: { method: string }[] } }) =>
@@ -624,8 +645,8 @@ describe("operations and force push", () => {
 });
 
 describe("panels", () => {
-  it("registers the compare and diff panel tabs", () => {
-    expect(app.threadPanelActions.map((action) => action.id)).toEqual(["compare", "diff"]);
+  it("registers the compare, diff and commit panel tabs", () => {
+    expect(app.threadPanelActions.map((action) => action.id)).toEqual(["compare", "diff", "commit"]);
   });
 
   it("renders the comparison and a file's patch", async () => {
@@ -649,5 +670,160 @@ describe("panels", () => {
     expect(slot.inspection.rpcCalls.map((call) => call.method)).toEqual(["compare", "comparePatch"]);
     const bad = renderSlot<PluginThreadPanelProps, typeof rpcContract>(compare, { threadId: "t1", params: { base: 1 } }, {});
     expect(bad.getByText(/Open this tab from a branch/u)).toBeTruthy();
+  });
+});
+
+describe("CommitPanel", () => {
+  type CommitRpc = Record<string, (input: never) => unknown>;
+
+  function renderCommitPanel(options: { changes?: ChangesResult; overview?: Overview; rpc?: CommitRpc } = {}) {
+    const view = options.overview ?? overview();
+    const panel = app.threadPanelActions.find((action) => action.id === "commit")!;
+    return renderSlot<PluginThreadPanelProps, typeof rpcContract>(
+      panel,
+      { threadId: "t1", params: {} },
+      {
+        sidebarThreads: sidebarThread({ id: "env1", branchName: "main" }),
+        settings: { updateStrategy: "ff-only", autoStash: false, confirmBeforePush: true, defaultRemote: "origin", fetchPrune: true },
+        rpc: {
+          overview: () => view,
+          changes: () => options.changes ?? CHANGES,
+          diffFile: (input: { path: string; side: "index" | "worktree" }) => ({ ok: true, path: input.path, side: input.side, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: null }),
+          stage: (input: { paths: string[] }) => ({ ok: true, message: `Staged ${input.paths.length} file(s).`, overview: view }),
+          unstage: (input: { paths: string[] }) => ({ ok: true, message: `Unstaged ${input.paths.length} file(s).`, overview: view }),
+          discard: () => ({ ok: true, message: "Discarded.", overview: view }),
+          commit: () => job("commit"),
+          push: () => job("push"),
+          jobGet: () => null,
+          jobCancel: () => ({ cancelled: true }),
+          ...options.rpc,
+        } as never,
+      },
+    );
+  }
+
+  const calls = (slot: { inspection: { rpcCalls: { method: string; input: unknown }[] } }, method: string) =>
+    slot.inspection.rpcCalls.filter((call) => call.method === method).map((call) => call.input);
+
+  it("lists the working tree in groups with the checkbox as the staged state", async () => {
+    const slot = renderCommitPanel();
+    await slot.findByText("staged.txt");
+    expect(slot.getByText("Changes")).toBeTruthy();
+    expect(slot.getByText("Unversioned files")).toBeTruthy();
+    expect(slot.getByTestId("vcs-commit-counts").textContent).toBe("2 staged · 2 unstaged");
+    expect(slot.getByLabelText("Unstage staged.txt").getAttribute("aria-checked")).toBe("true");
+    expect(slot.getByLabelText("Stage edited.txt").getAttribute("aria-checked")).toBe("false");
+    expect(slot.getByLabelText("Unstage both.txt").getAttribute("aria-checked")).toBe("mixed");
+    expect(slot.getByLabelText("Stage new.txt").getAttribute("aria-checked")).toBe("false");
+    expect(slot.queryByText("Nothing to commit: the working tree is clean.")).toBeNull();
+  });
+
+  it("stages and unstages through the checkboxes, whole groups through the header", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await user.click(await slot.findByLabelText("Stage edited.txt"));
+    await waitFor(() => expect(calls(slot, "stage")).toEqual([{ threadId: "t1", paths: ["edited.txt"] }]));
+    await user.click(slot.getByLabelText("Unstage staged.txt"));
+    await waitFor(() => expect(calls(slot, "unstage")).toEqual([{ threadId: "t1", paths: ["staged.txt"] }]));
+    await user.click(slot.getByLabelText("Stage all in Changes"));
+    await waitFor(() => expect(calls(slot, "stage").at(-1)).toEqual({ threadId: "t1", paths: ["edited.txt", "both.txt"] }));
+  });
+
+  it("previews the staged side of a selected file and lets the other side be picked", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await user.click(await slot.findByText("both.txt"));
+    await slot.findByTestId("vcs-patch");
+    expect(calls(slot, "diffFile")).toEqual([{ threadId: "t1", path: "both.txt", oldPath: null, side: "index" }]);
+    await user.click(slot.getByText("Unstaged", { selector: "button" }));
+    await waitFor(() => expect(calls(slot, "diffFile").at(-1)).toEqual({ threadId: "t1", path: "both.txt", oldPath: null, side: "worktree" }));
+  });
+
+  it("commits the index with the message as a job and clears the message when it finishes", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await slot.findByText("staged.txt");
+    const button = slot.getByTestId("vcs-commit-button") as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await user.type(slot.getByTestId("vcs-commit-message"), "Ship it");
+    expect(button.disabled).toBe(false);
+    await user.click(button);
+    await waitFor(() => expect(calls(slot, "commit")).toEqual([{ threadId: "t1", message: "Ship it", amend: false, signoff: false, noVerify: false }]));
+    expect(slot.getByTestId("vcs-commit-busy")).toBeTruthy();
+    await slot.behavior.emitRealtime("job", { jobId: "job-commit", event: { kind: "finished", result: { ok: true, message: "Committed abc1234: Ship it", overview: overview() } } });
+    await waitFor(() => expect((slot.getByTestId("vcs-commit-message") as HTMLTextAreaElement).value).toBe(""));
+    expect(slot.getByText("Committed abc1234: Ship it")).toBeTruthy();
+  });
+
+  it("refuses to commit while blocked, and without anything staged", async () => {
+    const slot = renderCommitPanel({ changes: { ...CHANGES, indexLocked: true } });
+    await slot.findByText("staged.txt");
+    expect(slot.getByText("Another git process holds the index lock.")).toBeTruthy();
+    const empty = renderCommitPanel({ changes: { ...CHANGES, files: [CHANGES.files[1]!] } });
+    await empty.findByText("edited.txt");
+    expect(empty.getByText("Nothing is staged: tick the files to include.")).toBeTruthy();
+  });
+
+  it("amend prefills the last message and asks first with the exact command", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await slot.findByText("staged.txt");
+    await user.click(slot.getByLabelText("Amend"));
+    expect((slot.getByTestId("vcs-commit-message") as HTMLTextAreaElement).value).toBe("Last one\n\nBody");
+    await user.click(slot.getByLabelText("Sign-off"));
+    await user.click(slot.getByTestId("vcs-commit-button"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git commit -F - --amend --signoff");
+    await user.click(screen.getByText("Amend", { selector: "button[type=button]" }));
+    await waitFor(() => expect(calls(slot, "commit")).toEqual([{ threadId: "t1", message: "Last one\n\nBody", amend: true, signoff: true, noVerify: false }]));
+  });
+
+  it("discard asks with one command per category and runs nothing on cancel", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await slot.findByText("new.txt");
+    await user.click(slot.getByLabelText("Discard changes in new.txt"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git --literal-pathspecs clean -f -- new.txt");
+    await user.click(screen.getByText("Cancel"));
+    expect(calls(slot, "discard")).toEqual([]);
+    await user.click(slot.getByLabelText("Discard changes in staged.txt"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git --literal-pathspecs restore --staged --worktree --source=HEAD -- staged.txt");
+    await user.click(screen.getByText("Discard", { selector: "button" }));
+    await waitFor(() => expect(calls(slot, "discard")).toEqual([{ threadId: "t1", restore: ["staged.txt"], remove: [], clean: [] }]));
+  });
+
+  it("Commit and Push follows the commit with the push dialog on the overview the commit reported", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel();
+    await slot.findByText("staged.txt");
+    await user.type(slot.getByTestId("vcs-commit-message"), "Ship and push");
+    await user.click(slot.getByTestId("vcs-commit-push-button"));
+    await waitFor(() => expect(calls(slot, "commit")).toHaveLength(1));
+    const after = overview({ head: { kind: "branch", name: "main", sha: "def5678" } });
+    await slot.behavior.emitRealtime("job", { jobId: "job-commit", event: { kind: "finished", result: { ok: true, message: "Committed def5678: Ship and push", overview: after } } });
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git push --no-progress --end-of-options origin HEAD:refs/heads/main");
+    await user.click(screen.getByText("Push", { selector: "button" }));
+    await waitFor(() => expect(calls(slot, "push")).toEqual([{ threadId: "t1", remote: "origin", setUpstream: false, expectedBranch: "main", source: "head", expectedSha: "def5678", lease: null }]));
+  });
+});
+
+describe("opening the commit panel", () => {
+  it("opens it from the popup's Commit row and straight from a palette request", async () => {
+    const user = userEvent.setup();
+    const opened: { actionId: string; title?: string }[] = [];
+    const slot = render({
+      openThreadPanel: (options) => {
+        opened.push({ actionId: options.actionId, title: options.title });
+        return true;
+      },
+    });
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    const popup = await screen.findByTestId("vcs-branch-popup");
+    await user.click(await within(popup).findByText("Commit..."));
+    await waitFor(() => expect(opened).toEqual([{ actionId: "commit", title: "Commit" }]));
+    await waitFor(() => expect(screen.queryByTestId("vcs-branch-popup")).toBeNull());
+    act(() => requestOpen({ threadId: "t1", action: "commit" }));
+    await waitFor(() => expect(opened).toHaveLength(2));
+    await new Promise((done) => setTimeout(done, 50));
+    expect(screen.queryByTestId("vcs-branch-popup")).toBeNull();
   });
 });

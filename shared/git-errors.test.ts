@@ -87,3 +87,13 @@ describe("pluginGitError", () => {
     expect(pluginGitError("head_changed", "Moved.", "push").hint).toMatch(/Open it again/u);
   });
 });
+
+describe("commit failures", () => {
+  it("quotes a hook's last line, not its progress, and recognises an empty index", () => {
+    const hook = classifyGitFailure({ phase: "commit", exitCode: 1, stderr: "hook working...\nstill working\nhook says no\n" });
+    expect(hook).toMatchObject({ code: "git_failed", message: "Commit failed: hook says no" });
+    const empty = classifyGitFailure({ phase: "commit", exitCode: 1, stderr: "", stdout: "On branch main\nnothing to commit, working tree clean\n" });
+    expect(empty).toMatchObject({ code: "nothing_to_commit" });
+    expect(empty.hint).toMatch(/Tick the files/u);
+  });
+});

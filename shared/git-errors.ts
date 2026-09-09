@@ -20,7 +20,10 @@ export type GitPhase =
   | "setUpstream"
   | "worktree"
   | "checkoutRevision"
-  | "compare";
+  | "compare"
+  | "stage"
+  | "discard"
+  | "commit";
 
 export interface GitFailureInput {
   phase: GitPhase;
@@ -43,6 +46,7 @@ interface Rule {
 // for both.
 const RULES: readonly Rule[] = [
   { code: "not_fully_merged", pattern: /is not fully merged/i },
+  { code: "nothing_to_commit", pattern: /nothing to commit|no changes added to commit|nothing added to commit/i },
   { code: "index_locked", pattern: /index\.lock|Another git process seems to be running|cannot lock ref|Unable to create .*\.lock/i },
   { code: "operation_in_progress", pattern: /You have not concluded your merge|MERGE_HEAD exists|rebase in progress|rebase-merge|rebase-apply|interactive rebase already started|cherry-pick (?:or revert )?is already in progress|A cherry-pick or revert is already in progress|revert is already in progress|Please, commit your changes before you merge/i },
   { code: "dirty_worktree", pattern: /would be overwritten by (?:checkout|merge|rebase)|Your local changes to the following files|Please commit your changes or stash them|cannot pull with rebase: You have unstaged changes|You have unstaged changes|Cannot rebase: Your index contains uncommitted changes|Please commit or stash them/i },
@@ -114,6 +118,7 @@ const HINTS: Partial<Record<GitErrorCode, Partial<Record<GitPhase | "any", strin
   },
   not_a_repo: { any: "Open a thread whose workspace is inside a git repository." },
   head_changed: { any: "The repository changed since the popup was opened. Open it again and retry." },
+  nothing_to_commit: { any: "Tick the files to include; the checkbox stages them." },
 };
 
 const PHASE_VERB: Record<GitPhase, string> = {
@@ -134,6 +139,9 @@ const PHASE_VERB: Record<GitPhase, string> = {
   worktree: "New Worktree",
   checkoutRevision: "Checkout",
   compare: "Compare",
+  stage: "Staging",
+  discard: "Discard",
+  commit: "Commit",
 };
 
 export function hintFor(code: GitErrorCode, phase: GitPhase): string | undefined {
@@ -153,6 +161,19 @@ export function firstStderrLine(stderr: string): string {
     .filter((candidate) => candidate.length > 0 && !candidate.startsWith("hint:"));
   const line = lines.find((candidate) => !/^To \S+$/u.test(candidate)) ?? lines[0];
   return (line ?? "").replace(/^(?:fatal|error|warning):\s*/iu, "").replace(/^!\s+/u, "");
+}
+
+/**
+ * The last meaningful stderr line. A hook prints its progress first and its
+ * verdict last ("hook working...", then "hook says no"), so for a commit
+ * that is the line to quote.
+ */
+export function lastStderrLine(stderr: string): string {
+  const lines = stderr
+    .split(/\r?\n/u)
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => candidate.length > 0 && !candidate.startsWith("hint:"));
+  return (lines.at(-1) ?? "").replace(/^(?:fatal|error|warning):\s*/iu, "").replace(/^!\s+/u, "");
 }
 
 function firstMatchingLine(text: string, pattern: RegExp): string | undefined {
@@ -190,7 +211,8 @@ export function classifyGitFailure(input: GitFailureInput): GitError {
   // The line that decided the code explains more than whatever came first
   // ("CONFLICT (content): ..." over "Auto-merging a.txt").
   const decisive = rule === undefined ? undefined : firstMatchingLine(haystack, rule.pattern);
-  const detail = decisive ?? (firstStderrLine(stderr) || firstStderrLine(input.stdout ?? ""));
+  const fallback = input.phase === "commit" ? lastStderrLine(stderr) : firstStderrLine(stderr);
+  const detail = decisive ?? (fallback || firstStderrLine(input.stdout ?? ""));
   const message = detail
     ? `${verb} failed: ${detail}`
     : `${verb} failed${input.exitCode === null ? "" : ` (exit ${input.exitCode})`}.`;

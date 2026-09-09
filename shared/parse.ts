@@ -190,6 +190,65 @@ export function parseStatusV2(raw: string): StatusSummary {
   return summary;
 }
 
+export interface StatusEntry {
+  path: string;
+  oldPath: string | null;
+  /** Index status letter; "." when the index matches HEAD. */
+  index: string;
+  /** Working tree status letter; "." when it matches the index, "?" untracked. */
+  worktree: string;
+  kind: "tracked" | "untracked" | "conflicted";
+}
+
+/**
+ * Parses `git status --porcelain=v2 -z --untracked-files=all` into one entry
+ * per path, in git's order. Header lines and ignored files are skipped;
+ * a rename or copy record takes the original path from the next NUL field.
+ */
+export function parseStatusEntries(raw: string): StatusEntry[] {
+  const entries: StatusEntry[] = [];
+  const tokens = raw.split("\0");
+  for (let index = 0; index < tokens.length; index += 1) {
+    const record = tokens[index] ?? "";
+    if (record.length === 0 || record.startsWith("# ")) continue;
+    const type = record[0];
+    if (type === "?") {
+      entries.push({ path: record.slice(2), oldPath: null, index: ".", worktree: "?", kind: "untracked" });
+      continue;
+    }
+    if (type === "!") continue;
+    const fields = record.split(" ");
+    const xy = fields[1] ?? "..";
+    const status = { index: xy[0] ?? ".", worktree: xy[1] ?? "." };
+    if (type === "1") {
+      const path = fields.slice(8).join(" ");
+      if (path.length > 0) entries.push({ path, oldPath: null, ...status, kind: "tracked" });
+    } else if (type === "2") {
+      const path = fields.slice(9).join(" ");
+      const oldPath = tokens[index + 1] ?? "";
+      index += 1;
+      if (path.length > 0) entries.push({ path, oldPath: oldPath.length > 0 ? oldPath : null, ...status, kind: "tracked" });
+    } else if (type === "u") {
+      const path = fields.slice(10).join(" ");
+      if (path.length > 0) entries.push({ path, oldPath: null, ...status, kind: "conflicted" });
+    }
+  }
+  return entries;
+}
+
+export interface CommitSummary {
+  branch: string;
+  sha: string;
+  subject: string;
+}
+
+/** `[main 1a2b3c4] subject`, `[main (root-commit) 1a2b3c4] ...`, `[detached HEAD 1a2b3c4] ...`. */
+export function parseCommitSummary(stdout: string): CommitSummary | null {
+  const match = /^\[(.+?)(?: \((?:root-commit|merge)\))? ([0-9a-f]{4,40})\] (.*)$/mu.exec(stdout);
+  if (!match) return null;
+  return { branch: match[1] ?? "", sha: match[2] ?? "", subject: match[3] ?? "" };
+}
+
 /**
  * Derives "recently checked out" branches from `git reflog show --format=%gs
  * -n <n> HEAD` (newest first). Only branches that still exist are kept, the

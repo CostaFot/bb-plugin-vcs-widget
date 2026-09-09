@@ -20,7 +20,7 @@ export interface ActionContext {
   signal?: AbortSignal;
 }
 
-function readOptions(context: ActionContext) {
+export function readOptions(context: ActionContext) {
   return { cwd: context.repo.repoRoot, timeoutMs: context.budget.deadlineFor("read"), signal: context.signal };
 }
 
@@ -44,15 +44,15 @@ export async function overviewAfterJob(repo: RepoInfo, signal?: AbortSignal): Pr
   return overviewOrNull({ repo, budget: createBudget(), signal });
 }
 
-async function fail(context: ActionContext, error: GitError): Promise<ActionResult> {
+export async function fail(context: ActionContext, error: GitError): Promise<ActionResult> {
   return { ok: false, error, overview: await overviewOrNull(context) };
 }
 
-async function succeed(context: ActionContext, message: string): Promise<ActionResult> {
+export async function succeed(context: ActionContext, message: string): Promise<ActionResult> {
   return { ok: true, message, overview: await overviewOrNull(context) };
 }
 
-function failureFrom(phase: GitPhase, result: GitRunResult, deadlineMs: number): GitError {
+export function failureFrom(phase: GitPhase, result: GitRunResult, deadlineMs: number): GitError {
   return classifyGitFailure({
     phase,
     exitCode: result.code,
@@ -89,7 +89,7 @@ async function listRemotes(context: ActionContext): Promise<string[]> {
 
 type Head = { kind: "branch"; name: string } | { kind: "detached" } | { kind: "unborn"; name: string };
 
-async function currentBranch(context: ActionContext): Promise<Head> {
+export async function currentBranch(context: ActionContext): Promise<Head> {
   const symbolic = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], readOptions(context));
   if (symbolic.code !== 0) return { kind: "detached" };
   const name = symbolic.stdout.trim();
@@ -124,7 +124,7 @@ async function otherWorktreeOf(context: ActionContext, branch: string): Promise<
   return resolve(path) === resolve(context.repo.repoRoot) ? null : path;
 }
 
-async function runPlan(context: ActionContext, plan: GitPlan, kind: "mutate" | "network"): Promise<{ result: GitRunResult; deadlineMs: number }> {
+export async function runPlan(context: ActionContext, plan: GitPlan, kind: "mutate" | "network"): Promise<{ result: GitRunResult; deadlineMs: number }> {
   const deadlineMs = context.budget.deadlineFor(kind);
   const result = await runGit(gitArgvFor(plan), { cwd: context.repo.repoRoot, timeoutMs: deadlineMs, signal: context.signal });
   return { result, deadlineMs };
@@ -437,14 +437,16 @@ export interface PreparedJob {
   outcome: (run: GitRunResult) => { ok: true; message: string } | { ok: false; error: GitError };
   /** Human-readable command; equals the previewed one. */
   command: string;
+  /** Text for git's stdin (a commit message); never an argument. */
+  stdin?: string;
 }
 
-function prepared(phase: GitPhase, plan: GitPlan, outcome: PreparedJob["outcome"]): PreparedJob {
-  return { plan, phase, outcome, command: gitCommandPreview(plan) };
+export function prepared(phase: GitPhase, plan: GitPlan, outcome: PreparedJob["outcome"], stdin?: string): PreparedJob {
+  return { plan, phase, outcome, command: gitCommandPreview(plan), ...(stdin === undefined ? {} : { stdin }) };
 }
 
 /** Classifies a non-zero exit; `onSuccess` builds the message otherwise. */
-function classifyOr(phase: GitPhase, timeoutMs: number, onSuccess: (run: GitRunResult) => { ok: true; message: string } | { ok: false; error: GitError }): PreparedJob["outcome"] {
+export function classifyOr(phase: GitPhase, timeoutMs: number, onSuccess: (run: GitRunResult) => { ok: true; message: string } | { ok: false; error: GitError }): PreparedJob["outcome"] {
   return (run) => (run.code !== 0 ? { ok: false, error: failureFrom(phase, run, timeoutMs) } : onSuccess(run));
 }
 

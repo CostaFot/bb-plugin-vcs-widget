@@ -1,17 +1,19 @@
 // VCS Group frontend: a branch button in every thread header that opens the
 // Git branches popup, command palette rows that open it or run one of its
-// quick actions, and two side-panel tabs (compare branches, diff with the
-// working tree) the popup's context menu opens.
+// quick actions, and three side-panel tabs: compare branches and diff with
+// the working tree (from the context menu) and the commit dialog.
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { requestOpen } from "./lib/events";
 import type { QuickActionId } from "./shared/model";
 import { BranchButton, PANEL_ACTION } from "./views/BranchButton";
+import { CommitPanel } from "./views/CommitPanel";
 import { ComparePanel, DiffPanel } from "./views/panels";
 import "./app.css";
 
 const PALETTE_ROWS: { id: string; title: string; action: QuickActionId | null }[] = [
   { id: "open-branches", title: "VCS Group: Open branches", action: null },
   { id: "update-project", title: "VCS Group: Update Project", action: "update" },
+  { id: "commit", title: "VCS Group: Commit...", action: "commit" },
   { id: "fetch", title: "VCS Group: Fetch", action: "fetch" },
   { id: "push", title: "VCS Group: Push...", action: "push" },
   { id: "new-branch", title: "VCS Group: New Branch...", action: "new-branch" },
@@ -38,6 +40,14 @@ export default definePluginApp((app) => {
     title: "Diff with working tree",
     icon: "FileDiff",
     component: DiffPanel,
+    layout: "flush",
+  });
+
+  app.slots.threadPanelAction({
+    id: PANEL_ACTION.commit,
+    title: "Commit",
+    icon: "Check",
+    component: CommitPanel,
     layout: "flush",
   });
 

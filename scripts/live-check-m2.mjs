@@ -2,7 +2,7 @@
 // context menu, favourites, rename, delete (-d then -D), tracked branch,
 // compare and diff panels, merge, conflict + abort, rebase, tag checkout,
 // worktree, background jobs (fetch, update, push, force-with-lease, remote
-// delete, cancel), six palette rows.
+// delete, cancel), seven palette rows.
 //
 //   node scripts/live-check.mjs setup /tmp/vcs-scratch          # once
 //   VCS_E2E_THREAD=thr_x VCS_E2E_PROJECT=proj_x node scripts/live-check-m2.mjs /tmp/vcs-scratch
@@ -261,10 +261,10 @@ try {
   step("M2-17 Delete on a remote branch runs as a job", cmd17 === `git push --no-progress --delete --end-of-options origin refs/heads/${PB}` && /Deleted origin\/.* on the remote/.test(st17) && !bareHeads().includes(PB), `cmd="${cmd17}" st="${st17}"`);
   await H.closePopup(page);
 
-  // M2-18 six palette rows
+  // M2-18 seven palette rows
   await H.palette(page, "VCS Group");
   const rows18 = await H.paletteRows(page);
-  step("M2-18 six palette rows", rows18.length === 6 && rows18.some((row) => /Checkout Tag or Revision/.test(row)), JSON.stringify(rows18));
+  step("M2-18 seven palette rows", rows18.length === 7 && rows18.some((row) => /Checkout Tag or Revision/.test(row)), JSON.stringify(rows18));
   await page.keyboard.press("Escape");
   await sleep(300);
 

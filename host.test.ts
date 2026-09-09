@@ -43,7 +43,7 @@ function okOverview(result: ActionResult): Overview {
   return result.overview as Overview;
 }
 
-type JobMethod = "fetch" | "pull" | "push" | "updateBranch" | "deleteRemoteBranch";
+type JobMethod = "fetch" | "pull" | "push" | "updateBranch" | "deleteRemoteBranch" | "commit";
 type JobInput<M extends JobMethod> = Omit<Parameters<typeof harness.experimental_call<M>>[1], "timeoutMs"> & { timeoutMs?: number };
 
 /** Starts a job and waits for its final result, the way the app does through signals. */
@@ -647,6 +647,180 @@ describe("compare and diff", () => {
     } finally {
       await git(repo, "checkout", "--", "a.txt");
     }
+  });
+});
+
+describe("commit panel", () => {
+  const changes = async () => {
+    const result = await harness.experimental_call("changes", { repoPath: repo });
+    if (!result.ok) throw new Error(result.error.message);
+    return result;
+  };
+  const row = (files: { path: string; index: string; worktree: string; kind: string; oldPath: string | null }[], path: string) =>
+    files.find((file) => file.path === path) ?? null;
+
+  it("lists the working tree and the index with their status letters and the last commit", async () => {
+    await git(repo, "switch", "-q", "main");
+    await git(repo, "reset", "-q", "--hard");
+    await git(repo, "clean", "-fdq");
+    await writeFile(join(repo, "a.txt"), "changed\n");
+    await writeFile(join(repo, "new.txt"), "new\n");
+    await writeFile(join(repo, "staged.txt"), "staged\n");
+    await git(repo, "add", "--", "staged.txt");
+    await git(repo, "mv", "b.txt", "moved.txt");
+    const result = await changes();
+    expect(result.head).toMatchObject({ kind: "branch", name: "main" });
+    expect(result.operation).toBe("none");
+    expect(result.indexLocked).toBe(false);
+    expect(result.truncated).toBe(false);
+    expect(result.lastCommit).toMatchObject({ subject: "main two" });
+    expect(row(result.files, "a.txt")).toMatchObject({ index: ".", worktree: "M", kind: "tracked" });
+    expect(row(result.files, "new.txt")).toMatchObject({ index: ".", worktree: "?", kind: "untracked" });
+    expect(row(result.files, "staged.txt")).toMatchObject({ index: "A", worktree: ".", kind: "tracked" });
+    expect(row(result.files, "moved.txt")).toMatchObject({ index: "R", worktree: ".", oldPath: "b.txt" });
+  });
+
+  it("stages, unstages, and diffs each side with both complete contents", async () => {
+    const staged = await harness.experimental_call("stage", { repoPath: repo, paths: ["a.txt", "new.txt"] });
+    expect(staged).toMatchObject({ ok: true, message: "Staged 2 files." });
+    let result = await changes();
+    expect(row(result.files, "a.txt")).toMatchObject({ index: "M", worktree: "." });
+    expect(row(result.files, "new.txt")).toMatchObject({ index: "A", worktree: ".", kind: "tracked" });
+    await writeFile(join(repo, "a.txt"), "changed\nagain\n");
+    result = await changes();
+    expect(row(result.files, "a.txt")).toMatchObject({ index: "M", worktree: "M" });
+
+    const atHead = `${await git(repo, "show", "HEAD:a.txt")}\n`;
+    const index = await harness.experimental_call("diffFile", { repoPath: repo, path: "a.txt", oldPath: null, side: "index" });
+    expect(index).toMatchObject({ ok: true, side: "index", binary: false, truncated: false });
+    if (index.ok) {
+      expect(index.patch).toContain("+changed");
+      expect(index.patch).not.toContain("+again");
+      expect(index.contents).toEqual({ old: { path: "a.txt", content: atHead }, new: { path: "a.txt", content: "changed\n" } });
+    }
+    const worktree = await harness.experimental_call("diffFile", { repoPath: repo, path: "a.txt", oldPath: null, side: "worktree" });
+    if (worktree.ok) {
+      expect(worktree.patch).toContain("+again");
+      expect(worktree.contents).toEqual({ old: { path: "a.txt", content: "changed\n" }, new: { path: "a.txt", content: "changed\nagain\n" } });
+    }
+    const renamed = await harness.experimental_call("diffFile", { repoPath: repo, path: "moved.txt", oldPath: "b.txt", side: "index" });
+    if (renamed.ok) {
+      expect(renamed.patch).toContain("rename from b.txt");
+      expect(renamed.contents).toEqual({ old: { path: "b.txt", content: "b\n" }, new: { path: "moved.txt", content: "b\n" } });
+    }
+
+    const unstaged = await harness.experimental_call("unstage", { repoPath: repo, paths: ["new.txt"] });
+    expect(unstaged).toMatchObject({ ok: true, message: "Unstaged 1 file." });
+    result = await changes();
+    expect(row(result.files, "new.txt")).toMatchObject({ kind: "untracked" });
+    const untracked = await harness.experimental_call("diffFile", { repoPath: repo, path: "new.txt", oldPath: null, side: "worktree" });
+    expect(untracked).toMatchObject({ ok: true });
+    if (untracked.ok) {
+      expect(untracked.patch).toContain("+new");
+      expect(untracked.contents).toEqual({ old: { path: "new.txt", content: "" }, new: { path: "new.txt", content: "new\n" } });
+    }
+    await expect(harness.experimental_call("stage", { repoPath: repo, paths: [] })).rejects.toThrow();
+    await expect(harness.experimental_call("stage", { repoPath: repo, paths: ["../x"] })).rejects.toThrow();
+  });
+
+  it("commits the index with the message on stdin, then amends and signs off", async () => {
+    const nothing = await runJob("commit", { repoPath: repo, message: "x", amend: false, signoff: false, noVerify: false });
+    // a.txt and staged.txt and the rename are staged, so this commits.
+    expect(nothing.ok).toBe(true);
+    expect(await git(repo, "log", "-1", "--format=%B")).toBe("x");
+    const empty = await runJob("commit", { repoPath: repo, message: "y", amend: false, signoff: false, noVerify: false });
+    expect(empty).toMatchObject({ ok: false, error: { code: "nothing_to_commit" } });
+
+    await writeFile(join(repo, "c1.txt"), "c1\n");
+    await harness.experimental_call("stage", { repoPath: repo, paths: ["c1.txt"] });
+    const result = await runJob("commit", { repoPath: repo, message: "From the panel\n\nWith a body: it's -F -", amend: false, signoff: false, noVerify: false });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.message).toMatch(/^Committed [0-9a-f]{7,}: From the panel$/u);
+    expect(await git(repo, "log", "-1", "--format=%B")).toBe("From the panel\n\nWith a body: it's -F -");
+    const parent = await git(repo, "rev-parse", "HEAD~1");
+
+    const amended = await runJob("commit", { repoPath: repo, message: "Amended subject", amend: true, signoff: true, noVerify: false });
+    expect(amended.ok).toBe(true);
+    if (amended.ok) expect(amended.message).toMatch(/^Amended [0-9a-f]{7,}: Amended subject$/u);
+    expect(await git(repo, "rev-parse", "HEAD~1")).toBe(parent);
+    expect(await git(repo, "log", "-1", "--format=%B")).toMatch(/^Amended subject\n\nSigned-off-by: VCS Test <vcs@example.com>$/u);
+    const state = await changes();
+    expect(state.lastCommit).toMatchObject({ subject: "Amended subject" });
+    // The second edit of a.txt was never staged; new.txt was unstaged above.
+    expect(state.files).toEqual([
+      { path: "a.txt", oldPath: null, index: ".", worktree: "M", kind: "tracked" },
+      { path: "new.txt", oldPath: null, index: ".", worktree: "?", kind: "untracked" },
+    ]);
+  });
+
+  it("runs hooks unless asked not to, and reports what the hook said", async () => {
+    const hooks = join(root, "hooks");
+    await mkdir(hooks, { recursive: true });
+    await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\necho 'hook says no' >&2\nexit 1\n");
+    await chmod(join(hooks, "pre-commit"), 0o755);
+    await git(repo, "config", "core.hooksPath", hooks);
+    try {
+      await writeFile(join(repo, "h.txt"), "h\n");
+      await harness.experimental_call("stage", { repoPath: repo, paths: ["h.txt"] });
+      const refused = await runJob("commit", { repoPath: repo, message: "hooked", amend: false, signoff: false, noVerify: false });
+      expect(refused).toMatchObject({ ok: false, error: { code: "git_failed", message: "Commit failed: hook says no" } });
+      const skipped = await runJob("commit", { repoPath: repo, message: "hooked", amend: false, signoff: false, noVerify: true });
+      expect(skipped.ok).toBe(true);
+    } finally {
+      await git(repo, "config", "--unset", "core.hooksPath");
+    }
+  });
+
+  it("discards per category: restores tracked files, unstages new ones, deletes untracked ones", async () => {
+    await writeFile(join(repo, "a.txt"), "discard me\n");
+    await writeFile(join(repo, "added.txt"), "added\n");
+    await git(repo, "add", "--", "added.txt");
+    await writeFile(join(repo, "junk.txt"), "junk\n");
+    const result = await harness.experimental_call("discard", { repoPath: repo, restore: ["a.txt"], remove: ["added.txt"], clean: ["junk.txt", "new.txt"] });
+    expect(result).toMatchObject({ ok: true, message: "Discarded changes in 4 files: reverted 1 file, unstaged 1 file (kept on disk), deleted 2 files." });
+    expect(await git(repo, "show", "HEAD:a.txt")).toBe((await exec("cat", [join(repo, "a.txt")])).stdout.trim());
+    const state = await changes();
+    expect(state.files).toEqual([{ path: "added.txt", oldPath: null, index: ".", worktree: "?", kind: "untracked" }]);
+    await expect(harness.experimental_call("discard", { repoPath: repo, restore: [], remove: [], clean: [] })).resolves.toMatchObject({ ok: false });
+    await git(repo, "clean", "-fdq");
+  });
+
+  it("refuses to commit with conflicts and blocks on the index lock", async () => {
+    await writeFile(join(repo, ".git", "index.lock"), "");
+    try {
+      expect(await harness.experimental_call("stage", { repoPath: repo, paths: ["a.txt"] })).toMatchObject({ ok: false, error: { code: "index_locked" } });
+      expect(await runJob("commit", { repoPath: repo, message: "x", amend: false, signoff: false, noVerify: false })).toMatchObject({ ok: false, error: { code: "index_locked" } });
+    } finally {
+      await rm(join(repo, ".git", "index.lock"));
+    }
+    await git(repo, "switch", "-q", "-c", "cf");
+    await commit(repo, "cf.txt", "one\n", "cf one");
+    await git(repo, "switch", "-q", "main");
+    await commit(repo, "cf.txt", "two\n", "main cf");
+    await exec("git", ["merge", "cf"], { cwd: repo, env: GIT_ENV }).catch(() => undefined);
+    try {
+      const state = await changes();
+      expect(state.operation).toBe("merge");
+      expect(row(state.files, "cf.txt")).toMatchObject({ kind: "conflicted" });
+      expect(await runJob("commit", { repoPath: repo, message: "x", amend: false, signoff: false, noVerify: false })).toMatchObject({ ok: false, error: { code: "conflict" } });
+    } finally {
+      await git(repo, "merge", "--abort");
+    }
+  });
+
+  it("makes a root commit in a repository without commits", async () => {
+    const fresh = join(root, "fresh");
+    await exec("git", ["init", "-q", "-b", "main", fresh], { env: GIT_ENV });
+    await writeFile(join(fresh, "first.txt"), "first\n");
+    const state = await harness.experimental_call("changes", { repoPath: fresh });
+    expect(state).toMatchObject({ ok: true, head: { kind: "unborn", name: "main" }, lastCommit: null });
+    expect(await runJob("commit", { repoPath: fresh, message: "x", amend: true, signoff: false, noVerify: false })).toMatchObject({ ok: false, error: { code: "ref_not_found" } });
+    await harness.experimental_call("stage", { repoPath: fresh, paths: ["first.txt"] });
+    expect(await harness.experimental_call("unstage", { repoPath: fresh, paths: ["first.txt"] })).toMatchObject({ ok: true });
+    await harness.experimental_call("stage", { repoPath: fresh, paths: ["first.txt"] });
+    const result = await runJob("commit", { repoPath: fresh, message: "first", amend: false, signoff: false, noVerify: false });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.message).toMatch(/^Committed [0-9a-f]{7,}: first$/u);
   });
 });
 

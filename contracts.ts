@@ -9,7 +9,14 @@
 // build rejects private @bb/* packages.
 import { defineRpcContract, type ExperimentalHostSignals } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { JOB_KINDS, PULL_STRATEGIES } from "./shared/constants";
+import {
+  DIFF_SIDES,
+  JOB_KINDS,
+  MAX_COMMIT_MESSAGE_BYTES,
+  MAX_PATHS_PER_CALL,
+  MAX_PATH_BYTES_PER_CALL,
+  PULL_STRATEGIES,
+} from "./shared/constants";
 import {
   MAX_BRANCH_NAME_LENGTH,
   isValidGitBranchName,
@@ -168,6 +175,7 @@ export const GIT_ERROR_CODES = [
   "not_fully_merged",
   "path_exists",
   "git_too_old",
+  "nothing_to_commit",
   "git_failed",
 ] as const;
 export const gitErrorCodeSchema = z.enum(GIT_ERROR_CODES);
@@ -286,6 +294,62 @@ export const workingTreeDiffSchema = z.union([
   failure,
 ]);
 
+/**
+ * One row of the commit panel: a porcelain v2 status entry. `index` and
+ * `worktree` are the two status letters (`.` unchanged, M, T, A, D, R, C; U
+ * and the pairs AA, DD, AU... on a conflicted entry; `?` in `worktree` for
+ * an untracked file).
+ */
+export const changeEntrySchema = z
+  .object({
+    path: z.string().min(1),
+    /** The original path of a rename or copy. */
+    oldPath: z.string().nullable(),
+    index: z.string().length(1),
+    worktree: z.string().length(1),
+    kind: z.enum(["tracked", "untracked", "conflicted"]),
+  })
+  .strict();
+
+export const changesResultSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      head: headSchema.nullable(),
+      operation: operationSchema,
+      indexLocked: z.boolean(),
+      files: z.array(changeEntrySchema),
+      truncated: z.boolean(),
+      /** HEAD, for the amend toggle; null on an unborn branch. */
+      lastCommit: z.object({ sha: z.string(), shortSha: z.string(), subject: z.string(), message: z.string() }).strict().nullable(),
+    })
+    .strict(),
+  failure,
+]);
+
+export const diffSideSchema = z.enum(DIFF_SIDES);
+
+const fileContentSchema = z.object({ path: z.string(), content: z.string() }).strict();
+
+export const fileDiffSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      path: z.string(),
+      side: diffSideSchema,
+      patch: z.string(),
+      truncated: z.boolean(),
+      binary: z.boolean(),
+      /**
+       * Both complete sides, when textual and small enough; the diff viewer
+       * can then expand context between hunks. Null otherwise.
+       */
+      contents: z.object({ old: fileContentSchema, new: fileContentSchema }).strict().nullable(),
+    })
+    .strict(),
+  failure,
+]);
+
 export const tagSchema = z
   .object({ name: z.string(), sha: z.string(), createdAt: count, subject: z.string() })
   .strict();
@@ -355,6 +419,41 @@ const diffWorkingTreePatchFields = { ...diffWorkingTreeFields, path: repoFilePat
 const updateBranchFields = { branch: branchNameSchema };
 const deleteRemoteBranchFields = { remote: remoteNameSchema, branch: branchNameSchema };
 const jobFields = { jobId: z.string().min(1).max(128) };
+
+const pathBytes = (paths: readonly string[]) => paths.reduce((total, path) => total + path.length + 1, 0);
+const withinArgv = (paths: readonly string[]) => pathBytes(paths) <= MAX_PATH_BYTES_PER_CALL;
+
+/** Paths for one `git add` / `reset` / `restore`: they travel on argv, so they are capped. */
+export const pathListSchema = z
+  .array(repoFilePathSchema)
+  .max(MAX_PATHS_PER_CALL)
+  .refine(withinArgv, { message: "Too many paths for one call" });
+const stageFields = { paths: pathListSchema.refine((paths) => paths.length > 0, { message: "No paths" }) };
+/**
+ * Discard, per category the app derived from the status letters: paths in
+ * HEAD are restored, new files leave the index (kept on disk), untracked
+ * files are deleted. The host runs exactly these three commands.
+ */
+const discardFields = {
+  restore: pathListSchema,
+  remove: pathListSchema,
+  clean: pathListSchema,
+};
+const commitMessageSchema = z
+  .string()
+  .min(1)
+  .max(MAX_COMMIT_MESSAGE_BYTES)
+  .refine((message) => message.trim().length > 0, { message: "Empty commit message" })
+  .refine((message) => !message.includes("\0"), { message: "Invalid commit message" });
+const commitFields = {
+  message: commitMessageSchema,
+  amend: z.boolean(),
+  signoff: z.boolean(),
+  /** Skip the pre-commit and commit-msg hooks (`--no-verify`). */
+  noVerify: z.boolean(),
+};
+/** `oldPath` (a rename's original) joins the pathspec so the patch shows the rename. */
+const diffFileFields = { path: repoFilePathSchema, oldPath: repoFilePathSchema.nullable(), side: diffSideSchema };
 
 // ---------------------------------------------------------------------------
 // Browser -> server. Every input carries the thread; the server resolves the
@@ -470,6 +569,30 @@ export const rpcContract = defineRpcContract({
     input: threadInput.extend({ name: z.string().min(1).max(512), favourite: z.boolean() }).strict(),
     output: favouriteNames,
   },
+  changes: {
+    input: threadInput.strict(),
+    output: changesResultSchema,
+  },
+  diffFile: {
+    input: threadInput.extend(diffFileFields).strict(),
+    output: fileDiffSchema,
+  },
+  stage: {
+    input: threadInput.extend(stageFields).strict(),
+    output: actionResultSchema,
+  },
+  unstage: {
+    input: threadInput.extend(stageFields).strict(),
+    output: actionResultSchema,
+  },
+  discard: {
+    input: threadInput.extend(discardFields).strict(),
+    output: actionResultSchema,
+  },
+  commit: {
+    input: threadInput.extend(commitFields).strict(),
+    output: jobStartSchema,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -577,6 +700,30 @@ export const hostContract = defineRpcContract({
     input: repoInput.extend(diffWorkingTreePatchFields).strict(),
     output: patchResultSchema,
   },
+  changes: {
+    input: repoInput.strict(),
+    output: changesResultSchema,
+  },
+  diffFile: {
+    input: repoInput.extend(diffFileFields).strict(),
+    output: fileDiffSchema,
+  },
+  stage: {
+    input: repoInput.extend(stageFields).strict(),
+    output: actionResultSchema,
+  },
+  unstage: {
+    input: repoInput.extend(stageFields).strict(),
+    output: actionResultSchema,
+  },
+  discard: {
+    input: repoInput.extend(discardFields).strict(),
+    output: actionResultSchema,
+  },
+  commit: {
+    input: repoInput.extend({ ...commitFields, timeoutMs: jobTimeoutMs }).strict(),
+    output: jobStartSchema,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -606,6 +753,11 @@ export type PatchResult = z.infer<typeof patchResultSchema>;
 export type WorkingTreeDiff = z.infer<typeof workingTreeDiffSchema>;
 export type Tag = z.infer<typeof tagSchema>;
 export type TagList = z.infer<typeof tagListSchema>;
+export type ChangeEntry = z.infer<typeof changeEntrySchema>;
+export type ChangesResult = z.infer<typeof changesResultSchema>;
+export type FileDiff = z.infer<typeof fileDiffSchema>;
+export type DiscardInput = { restore: string[]; remove: string[]; clean: string[] };
+export type CommitInput = { message: string; amend: boolean; signoff: boolean; noVerify: boolean };
 export type HostSignals = typeof hostSignals;
 export type JobEventSignal = z.infer<HostSignals["jobEvent"]["payload"]>;
 export type ChangedSignal = z.infer<HostSignals["changed"]["payload"]>;

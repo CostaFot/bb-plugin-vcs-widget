@@ -24,6 +24,7 @@ const JOB_LABEL: Record<string, string> = {
   push: "Push",
   updateBranch: "Update",
   deleteRemoteBranch: "Remote delete",
+  commit: "Commit",
 };
 
 function elapsed(startedAt: number): string {

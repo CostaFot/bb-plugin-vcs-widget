@@ -8,7 +8,9 @@ import { toast } from "sonner";
 import type {
   ActionResult,
   BranchRef,
+  ChangeEntry,
   CheckoutTarget,
+  CommitInput,
   GitError,
   JobStart,
   JobSummary,
@@ -21,6 +23,8 @@ import { isValidRemoteName } from "../shared/branch-name";
 import { isPullStrategy, type PullStrategy } from "../shared/constants";
 import {
   confirmTierFor,
+  discardPlanFor,
+  discardPlans,
   fullRef,
   gitCommandPreview,
   gitCommandsPreview,
@@ -64,6 +68,11 @@ interface UseVcsActionsOptions {
   onCheckedOut: () => void;
   /** Waits for a started job; from `useJobs`. */
   waitForJob: (job: JobSummary) => Promise<ActionResult>;
+  /**
+   * No toasts: the caller shows `status` inline. The commit panel sits where
+   * bb stacks its toasts, so a toast there would cover the form it reports on.
+   */
+  quiet?: boolean;
 }
 
 interface EffectiveSettings {
@@ -99,7 +108,7 @@ export function toRef(entry: BranchEntry): BranchRef {
     : { kind: "remote", remote: entry.branch.remote, branch: entry.branch.branch };
 }
 
-export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut, waitForJob }: UseVcsActionsOptions) {
+export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut, waitForJob, quiet = false }: UseVcsActionsOptions) {
   const rpc = useRpc<typeof rpcContract>();
   const { values } = useSettings();
   const settings = readSettings(values);
@@ -115,14 +124,14 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
       if (result.overview !== null) applyOverview(result.overview);
       if (result.ok) {
         setStatus({ kind: "ok", text: result.message });
-        toast.success(result.message);
+        if (!quiet) toast.success(result.message);
         if (options.closeOnSuccess) onCheckedOut();
       } else {
         setStatus({ kind: "error", error: result.error });
-        toast.error(result.error.message);
+        if (!quiet) toast.error(result.error.message);
       }
     },
-    [applyOverview, onCheckedOut],
+    [applyOverview, onCheckedOut, quiet],
   );
 
   const execute = useCallback(
@@ -144,13 +153,13 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
       } catch (cause) {
         const error = unexpectedGitError(cause);
         setStatus({ kind: "error", error });
-        toast.error(error.message);
+        if (!quiet) toast.error(error.message);
         return null;
       } finally {
         inFlight.current = false;
       }
     },
-    [report],
+    [quiet, report],
   );
 
   /** Starts a job on the host and waits for its result. */
@@ -175,13 +184,13 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
       } catch (cause) {
         const error = unexpectedGitError(cause);
         setStatus({ kind: "error", error });
-        toast.error(error.message);
+        if (!quiet) toast.error(error.message);
         return null;
       } finally {
         inFlight.current = false;
       }
     },
-    [report, waitForJob],
+    [quiet, report, waitForJob],
   );
 
   const requestOrRun = useCallback((request: ConfirmRequest, run: (toggled: boolean) => Promise<void>) => {
@@ -244,11 +253,10 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     );
   }, [executeJob, requestOrRun, rpc, settings.autoStash, settings.strategy, threadId, tierContext]);
 
-  /** Push the current branch, or `branch` by its own ref. */
-  const push = useCallback(
-    (branch?: LocalBranch) => {
-      if (overview === null) return;
-      const intent = pushIntentFor(overview, settings.defaultRemote, branch);
+  /** Push from a given overview: the current branch, or `branch` by its own ref. */
+  const pushWith = useCallback(
+    (view: Overview, branch?: LocalBranch) => {
+      const intent = pushIntentFor(view, settings.defaultRemote, branch);
       if (intent === null) {
         toast.error("Check out a branch first.");
         return;
@@ -297,7 +305,15 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
         },
       );
     },
-    [executeJob, overview, requestOrRun, rpc, settings.defaultRemote, threadId, tierContext],
+    [executeJob, requestOrRun, rpc, settings.defaultRemote, threadId, tierContext],
+  );
+
+  /** Push the current branch, or `branch` by its own ref, from the overview on screen. */
+  const push = useCallback(
+    (branch?: LocalBranch) => {
+      if (overview !== null) pushWith(overview, branch);
+    },
+    [overview, pushWith],
   );
 
   // -------------------------------------------------------------------------
@@ -504,6 +520,94 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     [execute, requestOrRun, rpc, threadId, tierContext],
   );
 
+  // -------------------------------------------------------------------------
+  // Milestone 3: the commit panel
+  // -------------------------------------------------------------------------
+
+  const stage = useCallback(
+    (paths: string[]) => execute("Staging…", () => rpc.call("stage", { threadId, paths })),
+    [execute, rpc, threadId],
+  );
+
+  const unstage = useCallback(
+    (paths: string[]) => execute("Unstaging…", () => rpc.call("unstage", { threadId, paths })),
+    [execute, rpc, threadId],
+  );
+
+  const files = (count: number) => `${count} file${count === 1 ? "" : "s"}`;
+
+  /** Discard is always destructive: the dialog lists every command by category. */
+  const discard = useCallback(
+    (entries: readonly ChangeEntry[]) => {
+      const plan = discardPlanFor(entries);
+      const plans = discardPlans(plan);
+      if (plans.length === 0) {
+        toast.error(plan.skipped.length > 0 ? "Conflicted files cannot be discarded; resolve them first." : "Nothing to discard.");
+        return;
+      }
+      const total = plan.restore.length + plan.remove.length + plan.clean.length;
+      const parts = [
+        plan.restore.length > 0 ? `revert ${files(plan.restore.length)} to HEAD` : null,
+        plan.remove.length > 0 ? `unstage ${files(plan.remove.length)} new to git (kept on disk)` : null,
+        plan.clean.length > 0 ? `delete ${files(plan.clean.length)} git does not track` : null,
+      ].filter((part): part is string => part !== null);
+      requestOrRun(
+        {
+          title: `Discard changes in ${files(total)}`,
+          description: `This will ${parts.join(", ")}.${plan.skipped.length > 0 ? " Conflicted files are skipped." : ""} Reverted edits and deleted files cannot be recovered.`,
+          tier: "destructive",
+          confirmLabel: "Discard",
+          command: gitCommandsPreview(plans),
+        },
+        async () => {
+          await execute("Discarding…", () =>
+            rpc.call("discard", { threadId, restore: plan.restore, remove: plan.remove, clean: plan.clean }),
+          );
+        },
+      );
+    },
+    [execute, requestOrRun, rpc, threadId],
+  );
+
+  /**
+   * Commit the index as a job; an amend asks first. With `andPush` the
+   * existing push flow follows on the overview the commit reported, so the
+   * push dialog names the new sha.
+   */
+  const commit = useCallback(
+    (input: CommitInput, options: { andPush: boolean; onDone?: (result: ActionResult) => void }) => {
+      const plan: GitPlan = { op: "commit", amend: input.amend, signoff: input.signoff, noVerify: input.noVerify };
+      requestOrRun(
+        {
+          title: "Amend the last commit",
+          description:
+            "Replaces HEAD with a new commit holding its changes plus what is staged, under this message. If HEAD was pushed already, the next push needs force with lease.",
+          tier: confirmTierFor(plan, tierContext()),
+          confirmLabel: "Amend",
+          command: gitCommandPreview(plan),
+        },
+        async () => {
+          const result = await executeJob(input.amend ? "Amending…" : "Committing…", () => rpc.call("commit", { threadId, ...input }));
+          if (result === null) return;
+          options.onDone?.(result);
+          if (!result.ok || !options.andPush) return;
+          let view = result.overview;
+          if (view === null) {
+            try {
+              view = await rpc.call("overview", { threadId });
+            } catch (cause) {
+              toast.error(`Committed, but the repository could not be read for the push: ${unexpectedGitError(cause).message}`);
+              return;
+            }
+            applyOverview(view);
+          }
+          pushWith(view);
+        },
+      );
+    },
+    [applyOverview, executeJob, pushWith, requestOrRun, rpc, threadId, tierContext],
+  );
+
   const cancelConfirm = useCallback(() => setConfirm(null), []);
   const acceptConfirm = useCallback(
     (toggled: boolean) => {
@@ -537,6 +641,10 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     setUpstream,
     addWorktree,
     checkoutRevision,
+    stage,
+    unstage,
+    discard,
+    commit,
     cancelConfirm,
     acceptConfirm,
     clearStatus,

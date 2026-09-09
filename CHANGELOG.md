@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0 (2026-09-09) — milestone 3
+
+The plugin's own commit dialog, as a thread panel tab.
+
+- "Commit" panel tab (also from the popup's new "Commit..." quick action
+  with its Ctrl+K hint, and the palette row "VCS Group: Commit..." which
+  opens it without the popup): the working tree and the index in Conflicts /
+  Changes / Unversioned files groups, IntelliJ's status letters, and a
+  checkbox per file whose state is the staged state (ticking runs `git add`,
+  unticking `git reset -q --`, a partially staged file shows a mixed box and
+  each group header toggles the whole group).
+- Diff preview of the selected file in bb's diff viewer with both complete
+  sides handed over (expand-context works), and a Staged / Unstaged switch
+  for a file changed on both sides; untracked files diff against /dev/null.
+- Commit runs as a background job so hooks can take as long as they need:
+  the message travels on git's stdin (`commit -F -`), hook output streams
+  into the panel, Cancel kills the process group. Options: Amend (asks first
+  with the exact command, prefills HEAD's message), Sign-off, Run Git hooks
+  (off adds `--no-verify`). Ctrl+Enter commits.
+- Commit and Push: the commit job, then the existing push dialog on the
+  overview the commit reported, so the push names the new sha.
+- Discard per file, always a destructive confirm listing one command per
+  category: `restore --staged --worktree --source=HEAD` for paths in HEAD,
+  `rm -q --cached` for files new to git (kept on disk), `clean -f` for
+  untracked files (deleted). Conflicted files cannot be discarded.
+- Every path command runs as `git --literal-pathspecs <cmd> -- <paths>`:
+  no globbing, no pathspec magic. Paths are validated at the RPC boundary
+  (relative, no `..`, at most 500 per call).
+- New typed error `nothing_to_commit`; the panel refuses to commit while the
+  index is locked, a job runs or conflicts remain, and explains why.
+- Live refresh: the panel follows `git add` and edits made from a terminal
+  or by an agent through bb's environment events and the host watch.
+
+
 ## 0.2.0 (2026-09-09) — milestone 2
 
 The full IntelliJ branch context menu, background network operations, live

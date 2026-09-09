@@ -32,6 +32,7 @@ import {
   type PreparedJob,
 } from "./host/actions";
 import { createBudget, DEADLINES_MS, type Budget } from "./host/budget";
+import { diffFile, discard, prepareCommit, readChanges, stage, unstage } from "./host/changes";
 import { compare, comparePatch, diffWorkingTree, diffWorkingTreePatch, listTags } from "./host/compare";
 import { GitSpawnError } from "./host/git";
 import { cancelJob, disposeJobs, jobState, startJob } from "./host/jobs";
@@ -145,6 +146,7 @@ async function startPlanJob(
     cwd: repo.repoRoot,
     argv: gitArgvFor(job.plan),
     command: job.command,
+    ...(job.stdin === undefined ? {} : { stdin: job.stdin }),
     timeoutMs,
     lifecycleSignal: context.lifecycle.signal,
     retainWorker: () => context.experimental_retainWorker(),
@@ -244,6 +246,24 @@ export default experimental_defineHostEntry({
     },
     diffWorkingTreePatch({ repoPath, ...input }, context) {
       return withRepoRead(repoPath, context, (action) => diffWorkingTreePatch(action, input), (error) => ({ ok: false, error }));
+    },
+    changes({ repoPath }, context) {
+      return withRepoRead(repoPath, context, (action) => readChanges(action), (error) => ({ ok: false, error }));
+    },
+    diffFile({ repoPath, ...input }, context) {
+      return withRepoRead(repoPath, context, (action) => diffFile(action, input), (error) => ({ ok: false, error }));
+    },
+    stage({ repoPath, paths }, context) {
+      return withRepo(repoPath, context, (action) => stage(action, paths));
+    },
+    unstage({ repoPath, paths }, context) {
+      return withRepo(repoPath, context, (action) => unstage(action, paths));
+    },
+    discard({ repoPath, ...input }, context) {
+      return withRepo(repoPath, context, (action) => discard(action, input));
+    },
+    commit({ repoPath, timeoutMs, ...input }, context) {
+      return startPlanJob(repoPath, context, "commit", timeoutMs, (action) => prepareCommit(action, { ...input, timeoutMs }));
     },
   },
   async dispose() {

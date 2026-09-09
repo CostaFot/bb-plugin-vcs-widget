@@ -2,12 +2,11 @@
 // and "Show Diff with Working Tree". Both are read-only and render bb's own
 // diff viewer for the selected file.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { experimental_Diff as Diff, useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
+import { experimental_Diff as Diff, useRpc } from "@get-bb/plugin-sdk/app";
 import type { Commit, CompareResult, FileChange, PatchResult, WorkingTreeDiff } from "../contracts";
-import { useSidebarThread } from "../hooks/use-sidebar-thread";
+import { useRepositoryChanges } from "../hooks/use-repository-changes";
 import { errorMessage } from "../lib/errors";
 import type { rpcContract } from "../server";
-import { CHANGED_CHANNEL } from "../shared/constants";
 import { refLabel } from "../shared/model";
 import { parseCompareParams, parseDiffParams } from "../shared/panel-params";
 import { Icon } from "@/components/ui/icon";
@@ -16,18 +15,6 @@ import { cn } from "@/lib/utils";
 interface PanelProps {
   threadId: string;
   params: unknown;
-}
-
-/** Refetches on repository changes for this thread's environment. */
-function useRepositoryChanges(threadId: string, refetch: () => void) {
-  const sidebar = useSidebarThread(threadId);
-  const environmentId = sidebar.environmentId;
-  useRealtime(CHANGED_CHANNEL, (payload) => {
-    const change = payload as { environmentId?: unknown; reason?: unknown };
-    if (change.reason === "favourites") return;
-    if (typeof change.environmentId === "string" && environmentId !== null && change.environmentId !== environmentId) return;
-    refetch();
-  });
 }
 
 function Empty({ children }: { children: string }) {

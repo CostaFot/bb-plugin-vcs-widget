@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { LocalBranch, Overview, RemoteBranch } from "../contracts";
+import type { ChangeEntry, LocalBranch, Overview, RemoteBranch } from "../contracts";
 import { unavailableOverview } from "../contracts";
 import {
   blockingReason,
   confirmTierFor,
+  diffSidesFor,
+  discardPlanFor,
+  discardPlans,
   entryKey,
+  stageState,
+  statusLetter,
   filterAndRank,
   fullRef,
   gitArgvFor,
@@ -97,6 +102,13 @@ describe("gitArgvFor / gitCommandPreview", () => {
     [{ op: "set-upstream", branch: "feat", upstream: null }, "git branch --unset-upstream --end-of-options feat"],
     [{ op: "worktree-add", path: "/w/repo-feat", branch: "feat" }, "git worktree add --end-of-options /w/repo-feat feat"],
     [{ op: "worktree-add-track", path: "/w/repo-feat", remote: "origin", branch: "feat" }, "git worktree add --track -b feat --end-of-options /w/repo-feat refs/remotes/origin/feat"],
+    [{ op: "stage", paths: ["a.txt", "dir/b.txt"] }, "git --literal-pathspecs add -A -- a.txt dir/b.txt"],
+    [{ op: "unstage", paths: ["a.txt"] }, "git --literal-pathspecs reset -q -- a.txt"],
+    [{ op: "restore-head", paths: ["a.txt"] }, "git --literal-pathspecs restore --staged --worktree --source=HEAD -- a.txt"],
+    [{ op: "rm-cached", paths: ["new.txt"] }, "git --literal-pathspecs rm -q --cached -- new.txt"],
+    [{ op: "clean", paths: ["junk.txt"] }, "git --literal-pathspecs clean -f -- junk.txt"],
+    [{ op: "commit", amend: false, signoff: false, noVerify: false }, "git commit -F -"],
+    [{ op: "commit", amend: true, signoff: true, noVerify: true }, "git commit -F - --amend --signoff --no-verify"],
   ] as const)("%j", (plan, preview) => {
     expect(gitCommandPreview(plan)).toBe(preview);
     expect(gitArgvFor(plan).join(" ")).toBe(preview.slice("git ".length));
@@ -171,6 +183,7 @@ describe("quickActionsFor", () => {
   it("enables everything on a healthy repo", () => {
     expect(quickActionsFor(overview()).map((action) => [action.id, action.disabled])).toEqual([
       ["update", false],
+      ["commit", false],
       ["fetch", false],
       ["push", false],
       ["new-branch", false],
@@ -193,6 +206,8 @@ describe("quickActionsFor", () => {
     const detached = quickActionsFor(overview({ head: { kind: "detached", sha: "abc1234def" } }));
     expect(detached.find((action) => action.id === "push")?.reason).toMatch(/Check out a branch/u);
     expect(detached.find((action) => action.id === "fetch")?.disabled).toBe(false);
+    expect(detached.find((action) => action.id === "commit")?.disabled).toBe(false);
+    expect(quickActionsFor(overview({ indexLocked: true })).find((action) => action.id === "commit")?.reason).toMatch(/index lock/u);
   });
   it("disables everything when unavailable", () => {
     const actions = quickActionsFor(unavailableOverview("No environment."));
@@ -310,6 +325,70 @@ describe("confirmTierFor", () => {
     expect(confirmTierFor({ op: "rename", from: "a", to: "b" }, context)).toBe("none");
     expect(confirmTierFor({ op: "set-upstream", branch: "a", upstream: null }, context)).toBe("none");
     expect(confirmTierFor({ op: "fetch-branch", remote: "origin", upstreamBranch: "a", branch: "a" }, context)).toBe("none");
+  });
+  it("never asks for staging, asks for an amend, and treats every discard as destructive", () => {
+    const context = { hasUncommittedChanges: true, confirmBeforePush: true };
+    expect(confirmTierFor({ op: "stage", paths: ["a"] }, context)).toBe("none");
+    expect(confirmTierFor({ op: "unstage", paths: ["a"] }, context)).toBe("none");
+    expect(confirmTierFor({ op: "commit", amend: false, signoff: false, noVerify: false }, context)).toBe("none");
+    expect(confirmTierFor({ op: "commit", amend: true, signoff: false, noVerify: false }, context)).toBe("confirm");
+    expect(confirmTierFor({ op: "restore-head", paths: ["a"] }, context)).toBe("destructive");
+    expect(confirmTierFor({ op: "rm-cached", paths: ["a"] }, context)).toBe("destructive");
+    expect(confirmTierFor({ op: "clean", paths: ["a"] }, context)).toBe("destructive");
+  });
+});
+
+describe("commit panel entries", () => {
+  const entry = (index: string, worktree: string, extra: Partial<ChangeEntry> = {}): ChangeEntry => ({
+    path: "f.txt",
+    oldPath: null,
+    index,
+    worktree,
+    kind: "tracked",
+    ...extra,
+  });
+  const untracked = entry(".", "?", { path: "u.txt", kind: "untracked" });
+  const conflicted = entry("U", "U", { path: "c.txt", kind: "conflicted" });
+
+  it("derives the checkbox state and the diff sides from the status letters", () => {
+    expect(stageState(entry("M", "."))).toBe("staged");
+    expect(stageState(entry(".", "M"))).toBe("unstaged");
+    expect(stageState(entry("M", "M"))).toBe("partial");
+    expect(stageState(entry("A", "."))).toBe("staged");
+    expect(stageState(untracked)).toBe("unstaged");
+    expect(stageState(conflicted)).toBe("partial");
+    expect(diffSidesFor(entry("M", "."))).toEqual(["index"]);
+    expect(diffSidesFor(entry(".", "M"))).toEqual(["worktree"]);
+    expect(diffSidesFor(entry("M", "M"))).toEqual(["index", "worktree"]);
+    expect(diffSidesFor(untracked)).toEqual(["worktree"]);
+    expect(diffSidesFor(conflicted)).toEqual(["worktree"]);
+    expect(statusLetter(entry("M", "."))).toBe("M");
+    expect(statusLetter(entry(".", "D"))).toBe("D");
+    expect(statusLetter(entry("R", "M"))).toBe("R");
+    expect(statusLetter(untracked)).toBe("?");
+    expect(statusLetter(conflicted)).toBe("U");
+  });
+
+  it("sorts a discard into restore, remove and clean, and skips conflicts", () => {
+    const plan = discardPlanFor([
+      entry("M", "."),
+      entry(".", "M", { path: "w.txt" }),
+      entry(".", "D", { path: "gone.txt" }),
+      entry("A", "M", { path: "new.txt" }),
+      entry("C", ".", { path: "copy.txt", oldPath: "f.txt" }),
+      entry(".", "A", { path: "intent.txt" }),
+      entry("R", ".", { path: "renamed.txt", oldPath: "orig.txt" }),
+      untracked,
+      conflicted,
+    ]);
+    expect(plan).toEqual({
+      restore: ["f.txt", "w.txt", "gone.txt", "orig.txt"],
+      remove: ["new.txt", "copy.txt", "intent.txt", "renamed.txt"],
+      clean: ["u.txt"],
+      skipped: ["c.txt"],
+    });
+    expect(discardPlans(plan).map((candidate) => candidate.op)).toEqual(["restore-head", "rm-cached", "clean"]);
+    expect(discardPlans({ restore: [], remove: [], clean: ["u.txt"] })).toEqual([{ op: "clean", paths: ["u.txt"] }]);
   });
 });
 

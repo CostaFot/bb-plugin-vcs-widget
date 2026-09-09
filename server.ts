@@ -50,6 +50,10 @@ const VERB: Record<string, string> = {
   setUpstream: "Changing the tracked branch",
   addWorktree: "Adding the worktree",
   checkoutRevision: "The checkout",
+  stage: "Staging",
+  unstage: "Unstaging",
+  discard: "The discard",
+  commit: "The commit",
 };
 
 function isDeadlineFailure(error: unknown): boolean {
@@ -408,6 +412,33 @@ export default async function plugin(bb: BbPluginApi) {
 
     diffWorkingTreePatch({ threadId, ...input }) {
       return withReadTarget(threadId, (repo) => host.call("diffWorkingTreePatch", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }), readFailure);
+    },
+
+    changes({ threadId }) {
+      return withReadTarget(threadId, (repo) => host.call("changes", { repoPath: repo.repoPath }, { hostId: repo.hostId }), readFailure);
+    },
+
+    diffFile({ threadId, ...input }) {
+      return withReadTarget(threadId, (repo) => host.call("diffFile", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }), readFailure);
+    },
+
+    stage({ threadId, paths }) {
+      return withTarget(threadId, "stage", (repo) => host.call("stage", { repoPath: repo.repoPath, paths }, { hostId: repo.hostId }));
+    },
+
+    unstage({ threadId, paths }) {
+      return withTarget(threadId, "unstage", (repo) => host.call("unstage", { repoPath: repo.repoPath, paths }, { hostId: repo.hostId }));
+    },
+
+    discard({ threadId, ...input }) {
+      return withTarget(threadId, "discard", (repo) => host.call("discard", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }));
+    },
+
+    commit({ threadId, ...input }) {
+      // The message is logged nowhere: it is the user's text, not an audit fact.
+      return withJobTarget(threadId, "commit", (repo, timeoutMs) =>
+        host.call("commit", { repoPath: repo.repoPath, ...input, timeoutMs }, { hostId: repo.hostId }),
+      );
     },
 
     async favourites({ threadId }) {

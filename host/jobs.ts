@@ -28,6 +28,8 @@ export interface StartJobInput {
   argv: string[];
   /** Human-readable command, shown to the user. */
   command: string;
+  /** Text for git's stdin (the commit message); never part of `argv`. */
+  stdin?: string;
   timeoutMs: number;
   lifecycleSignal: AbortSignal;
   retainWorker: () => Lease;
@@ -147,6 +149,7 @@ export function startJob(input: StartJobInput): JobSummary {
         timeoutMs: input.timeoutMs,
         signal: controller.signal,
         onOutput,
+        ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
       });
       if (partial.trim().length > 0) onOutput("\n");
       // Off the repository before the overview read, so the result's
