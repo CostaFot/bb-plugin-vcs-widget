@@ -317,6 +317,12 @@ reports — the commit panel on its own status line, the popup and the log by
 toast. Nothing in the plugin needed changing; the headless denial really was
 Chromium's.
 
+The two agent buttons of COS-143 were hand-checked on 2026-09-09 and pass
+(COS-144): the Sent glyph renders, the wrapper span's tooltip appears on
+hover, and "Agent Commit & Push" reaches the agent as "LGTM - Commit & Push".
+Scenarios 11 and 12 stay by hand: the script reads that button rather than
+pressing it, because pressing it tells a real agent to push.
+
 Milestone 5's first run failed on the settings page because it looked for it
 at `/extensions/plugins/<id>`, which is the marketplace page; the plugin's
 settings live at `/settings/plugins/<id>`. It also could not reopen the
