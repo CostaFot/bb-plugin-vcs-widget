@@ -1,15 +1,14 @@
-// The only way git is ever executed: execFile with an argv, no shell, a
-// hygienic environment, and a per-command deadline that keeps every handler
-// under bb's fixed 30 s host-call cap.
-import { execFile } from "node:child_process";
+// The only way git is ever executed: spawn with an argv, no shell, a hygienic
+// environment, and a deadline that kills git's whole process group (ssh,
+// credential helpers, the fetch and merge children of `git pull`) rather
+// than only the top-level process.
+import { spawn } from "node:child_process";
 
-export const DEADLINES_MS = {
-  read: 10_000,
-  mutate: 20_000,
-  network: 25_000,
-} as const;
+export { DEADLINES_MS } from "./budget";
 
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+/** After SIGTERM, how long a process group gets before SIGKILL. */
+const KILL_GRACE_MS = 2_000;
 
 export interface GitRunOptions {
   cwd: string;
@@ -48,9 +47,12 @@ export function gitEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   };
 }
 
+const useProcessGroups = process.platform !== "win32";
+
 /**
  * Runs git and resolves with its outcome, never rejecting for a non-zero
- * exit. Rejects only when git cannot be spawned at all.
+ * exit. Rejects only when git cannot be spawned at all or floods the output
+ * limit. A zero or negative deadline resolves as timed out without spawning.
  */
 export function runGit(args: readonly string[], options: GitRunOptions): Promise<GitRunResult> {
   const argv = [...args];
@@ -59,48 +61,106 @@ export function runGit(args: readonly string[], options: GitRunOptions): Promise
       resolve({ argv, code: null, stdout: "", stderr: "", timedOut: false, cancelled: true });
       return;
     }
-    execFile(
-      "git",
-      argv,
-      {
-        cwd: options.cwd,
-        env: gitEnv(options.env),
-        encoding: "utf8",
-        maxBuffer: MAX_OUTPUT_BYTES,
-        timeout: options.timeoutMs,
-        killSignal: "SIGTERM",
-        windowsHide: true,
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-      },
-      (error, stdout, stderr) => {
-        if (error === null) {
-          resolve({ argv, code: 0, stdout, stderr, timedOut: false, cancelled: false });
-          return;
+    if (options.timeoutMs <= 0) {
+      resolve({ argv, code: null, stdout: "", stderr: "", timedOut: true, cancelled: false });
+      return;
+    }
+
+    const child = spawn("git", argv, {
+      cwd: options.cwd,
+      env: gitEnv(options.env),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: useProcessGroups,
+      windowsHide: true,
+    });
+
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let bytes = 0;
+    let timedOut = false;
+    let cancelled = false;
+    let overflow = false;
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const killGroup = (signal: NodeJS.Signals) => {
+      try {
+        if (useProcessGroups && child.pid !== undefined) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        // Already gone.
+      }
+    };
+    const stop = () => {
+      killGroup("SIGTERM");
+      killTimer ??= setTimeout(() => killGroup("SIGKILL"), KILL_GRACE_MS);
+    };
+    const onAbort = () => {
+      cancelled = true;
+      stop();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, options.timeoutMs);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+
+    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_OUTPUT_BYTES) {
+        overflow = true;
+        stop();
+        return;
+      }
+      chunks.push(chunk);
+    };
+    child.stdout?.on("data", collect(stdout));
+    child.stderr?.on("data", collect(stderr));
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (killTimer !== null) clearTimeout(killTimer);
+      options.signal?.removeEventListener("abort", onAbort);
+      fn();
+    };
+
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      finish(() => {
+        reject(
+          new GitSpawnError(
+            error.code === "ENOENT" ? "git is not installed on the machine that owns this worktree." : error.message,
+            argv,
+          ),
+        );
+      });
+    });
+
+    child.on("close", (code, signal) => {
+      finish(() => {
+        const out = Buffer.concat(stdout).toString("utf8");
+        const err = Buffer.concat(stderr).toString("utf8");
+        if (cancelled) {
+          resolve({ argv, code: null, stdout: out, stderr: err, timedOut: false, cancelled: true });
+        } else if (timedOut) {
+          resolve({ argv, code: null, stdout: out, stderr: err, timedOut: true, cancelled: false });
+        } else if (overflow) {
+          reject(new GitSpawnError("git produced more output than the plugin can handle.", argv));
+        } else if (code === null) {
+          resolve({
+            argv,
+            code: null,
+            stdout: out,
+            stderr: err.length > 0 ? err : `git was stopped by ${signal ?? "a signal"}.`,
+            timedOut: false,
+            cancelled: false,
+          });
+        } else {
+          resolve({ argv, code, stdout: out, stderr: err, timedOut: false, cancelled: false });
         }
-        const failure = error as NodeJS.ErrnoException & {
-          code?: number | string;
-          killed?: boolean;
-          signal?: NodeJS.Signals | null;
-        };
-        if (failure.code === "ENOENT") {
-          reject(new GitSpawnError("git is not installed on the machine that owns this worktree.", argv));
-          return;
-        }
-        if (failure.name === "AbortError" || options.signal?.aborted) {
-          resolve({ argv, code: null, stdout, stderr, timedOut: false, cancelled: true });
-          return;
-        }
-        if (failure.killed === true || failure.signal === "SIGTERM") {
-          resolve({ argv, code: null, stdout, stderr, timedOut: true, cancelled: false });
-          return;
-        }
-        if (typeof failure.code === "number") {
-          resolve({ argv, code: failure.code, stdout, stderr, timedOut: false, cancelled: false });
-          return;
-        }
-        reject(new GitSpawnError(failure.message, argv));
-      },
-    );
+      });
+    });
   });
 }
 

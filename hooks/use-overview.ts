@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRealtime, useRealtimeConnectionState, useRpc } from "@get-bb/plugin-sdk/app";
 import type { Overview } from "../contracts";
 import type { rpcContract } from "../server";
-import { CHANGED_CHANNEL } from "../server/after-mutation";
+import { CHANGED_CHANNEL } from "../shared/constants";
 import { errorMessage } from "../lib/errors";
 
 interface UseOverviewOptions {

@@ -69,14 +69,27 @@ describe("remote and refish names", () => {
     expect(isValidRefish("HEAD~2")).toBe(true);
     expect(isValidRefish("v1.0^{commit}")).toBe(true);
     expect(isValidRefish("abc1234")).toBe(true);
+    expect(isValidRefish("@{-1}")).toBe(true);
+    // Anything a branch may be called is a valid start point.
+    expect(isValidRefish("feature/über")).toBe(true);
+    expect(isValidRefish("release+hotfix")).toBe(true);
+    expect(isValidRefish("日本")).toBe(true);
+    // git accepts remote names with slashes.
+    expect(isValidRemoteName("org/mirror")).toBe(true);
   });
   it("rejects option-shaped and traversal-shaped values", () => {
     expect(isValidRemoteName("-origin")).toBe(false);
     expect(isValidRemoteName("ori gin")).toBe(false);
-    expect(isValidRemoteName("a/b")).toBe(false);
+    expect(isValidRemoteName("a//b")).toBe(false);
+    expect(isValidRemoteName("a/")).toBe(false);
+    expect(isValidRemoteName("/a")).toBe(false);
+    expect(isValidRemoteName("a..b")).toBe(false);
     expect(isValidRefish("-rf")).toBe(false);
     expect(isValidRefish("a..b")).toBe(false);
     expect(isValidRefish("a b")).toBe(false);
+    expect(isValidRefish("HEAD:file")).toBe(false);
+    expect(isValidRefish("a\\b")).toBe(false);
+    expect(isValidRefish("a\u0000b")).toBe(false);
     expect(isValidRefish("")).toBe(false);
   });
 });

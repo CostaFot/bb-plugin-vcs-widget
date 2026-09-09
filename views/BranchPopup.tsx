@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Overview } from "../contracts";
 import type { ActionStatus } from "../hooks/use-vcs-actions";
-import { filterAndRank, groupBranches, type BranchMenuItemId, type QuickActionId } from "../shared/model";
+import {
+  filterAndRank,
+  groupBranches,
+  quickActionsFor,
+  type BranchMenuItemId,
+  type QuickActionId,
+} from "../shared/model";
 import { BranchRow, type BranchEntry } from "./BranchRow";
 import { NewBranchStep } from "./NewBranchStep";
 import { QuickActions } from "./QuickActions";
@@ -19,6 +25,7 @@ import { PopoverContent } from "@/components/ui/popover";
 type Step = { kind: "list" } | { kind: "new-branch"; from: string | null };
 
 interface BranchPopupProps {
+  open: boolean;
   overview: Overview | null;
   loading: boolean;
   loadError: string | null;
@@ -33,6 +40,7 @@ interface BranchPopupProps {
 }
 
 export function BranchPopup({
+  open,
   overview,
   loading,
   loadError,
@@ -48,6 +56,14 @@ export function BranchPopup({
   const [step, setStep] = useState<Step>({ kind: "list" });
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // The popup stays mounted while closed; a reopen starts from a clean list.
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+      setStep({ kind: "list" });
+    }
+  }, [open]);
+
   const groups = useMemo(() => (overview ? groupBranches(overview) : null), [overview]);
   const recent = useMemo(() => (groups ? filterAndRank(groups.recent, query) : []), [groups, query]);
   const local = useMemo(() => (groups ? filterAndRank(groups.local, query) : []), [groups, query]);
@@ -62,9 +78,15 @@ export function BranchPopup({
     onQuickAction(id);
   };
 
+  // A palette request obeys the same guards as a click on the row.
   useEffect(() => {
     if (pendingAction === null || overview === null) return;
     onPendingActionConsumed();
+    const action = quickActionsFor(overview).find((candidate) => candidate.id === pendingAction);
+    if (action === undefined || action.disabled || busy) {
+      toast.error(action?.reason ?? "Another VCS action is still running.");
+      return;
+    }
     runQuickAction(pendingAction);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per request
   }, [pendingAction, overview]);
@@ -96,6 +118,14 @@ export function BranchPopup({
       mobileTitle="Git branches"
       autoFocusRef={inputRef}
       data-testid="vcs-branch-popup"
+      onEscapeKeyDown={(event) => {
+        // Radix dismisses on Escape at the document level before any input
+        // handler runs; in the New Branch step Escape goes back to the list.
+        if (step.kind === "new-branch") {
+          event.preventDefault();
+          setStep({ kind: "list" });
+        }
+      }}
     >
       {step.kind === "new-branch" ? (
         <NewBranchStep
@@ -142,19 +172,21 @@ export function BranchPopup({
                         ))}
                       </CommandGroup>
                     ) : null}
-                    <CommandGroup heading={overview.truncated.local ? "Local (truncated)" : "Local"}>
-                      {local.map((branch) => (
-                        <BranchRow
-                          key={`local:${branch.name}`}
-                          value={`local:${branch.name}`}
-                          entry={{ kind: "local", branch }}
-                          overview={overview}
-                          disabled={rowDisabled}
-                          onSelect={onCheckout}
-                          onMenu={onMenu}
-                        />
-                      ))}
-                    </CommandGroup>
+                    {local.length > 0 ? (
+                      <CommandGroup heading={overview.truncated.local ? "Local (truncated)" : "Local"}>
+                        {local.map((branch) => (
+                          <BranchRow
+                            key={`local:${branch.name}`}
+                            value={`local:${branch.name}`}
+                            entry={{ kind: "local", branch }}
+                            overview={overview}
+                            disabled={rowDisabled}
+                            onSelect={onCheckout}
+                            onMenu={onMenu}
+                          />
+                        ))}
+                      </CommandGroup>
+                    ) : null}
                     {remote.length > 0 ? (
                       <CommandGroup heading={overview.truncated.remote ? "Remote (truncated)" : "Remote"}>
                         {remote.map((branch) => (

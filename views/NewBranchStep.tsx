@@ -48,12 +48,6 @@ export function NewBranchStep({ from, busy, onCancel, onCreate }: NewBranchStepP
         aria-invalid={showProblem}
         autoComplete="off"
         spellCheck={false}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
       />
       <p className={showProblem ? "text-xs text-destructive" : "text-xs text-muted-foreground"} role={showProblem ? "alert" : undefined}>
         {showProblem ? problem : "Letters, digits, '/', '.', '-' and '_'."}

@@ -38,8 +38,8 @@ const RULES: readonly Rule[] = [
   { code: "conflict", pattern: /CONFLICT \(|Automatic merge failed|could not apply|Resolve all conflicts|fix conflicts and then|Merge conflict in|error: could not apply/i },
   { code: "ref_exists", pattern: /a branch named '.*' already exists|already exists\.?$/im },
   { code: "invalid_ref_name", pattern: /is not a valid branch name|not a valid ref name|invalid branch name|check-ref-format|is not a valid refname|'.*' is not a valid/i },
-  { code: "ref_not_found", pattern: /pathspec '.*' did not match|invalid reference: |unknown revision or path|Needed a single revision|not something we can merge|couldn't find remote ref|invalid upstream|fatal: ambiguous argument|no such branch/i },
-  { code: "no_upstream", pattern: /no tracking information|has no upstream branch|no upstream configured|There is no tracking information for the current branch|The current branch .* has no upstream branch|upstream branch of your current branch does not match/i },
+  { code: "ref_not_found", pattern: /pathspec '.*' did not match|invalid reference: |unknown revision or path|Needed a single revision|not something we can merge|couldn't find remote ref|invalid upstream|fatal: ambiguous argument|ambiguous object name|refname '.*' is ambiguous|no such branch/i },
+  { code: "no_upstream", pattern: /no tracking information|has no upstream branch|no upstream configured|There is no tracking information for the current branch|The current branch .* has no upstream branch|upstream branch of your current branch does not match|but no such ref was fetched/i },
   { code: "no_remote", pattern: /does not appear to be a git repository|No such remote|No remote repository specified|no remote configured|'.*' does not appear to be a git repository|No configured push destination/i },
   { code: "auth_required", pattern: /could not read Username|could not read Password|Permission denied \(publickey|terminal prompts disabled|Authentication failed|Host key verification failed|Invalid username or (?:password|token)|remote: Support for password authentication was removed|HTTP Basic: Access denied|Repository not found/i },
   { code: "network", pattern: /Could not resolve host|Connection refused|Connection timed out|unable to access|Network is unreachable|Failed to connect|Could not read from remote repository|Connection reset by peer|Operation timed out|The remote end hung up unexpectedly|early EOF/i },
@@ -91,6 +91,7 @@ const HINTS: Partial<Record<GitErrorCode, Partial<Record<GitPhase | "any", strin
     any: "Try again.",
   },
   not_a_repo: { any: "Open a thread whose workspace is inside a git repository." },
+  head_changed: { any: "The repository changed since the popup was opened. Open it again and retry." },
 };
 
 const PHASE_VERB: Record<GitPhase, string> = {
@@ -108,13 +109,18 @@ export function hintFor(code: GitErrorCode, phase: GitPhase): string | undefined
   return entry?.[phase] ?? entry?.any;
 }
 
-/** The first meaningful stderr line, without git's "fatal: "/"error: " prefix. */
+/**
+ * The first meaningful stderr line, without git's "fatal: "/"error: " prefix.
+ * Push output starts with "To <url>", which explains nothing; the rejection
+ * line after it does.
+ */
 export function firstStderrLine(stderr: string): string {
-  const line = stderr
+  const lines = stderr
     .split(/\r?\n/u)
     .map((candidate) => candidate.trim())
-    .find((candidate) => candidate.length > 0 && !candidate.startsWith("hint:"));
-  return (line ?? "").replace(/^(?:fatal|error|warning):\s*/iu, "");
+    .filter((candidate) => candidate.length > 0 && !candidate.startsWith("hint:"));
+  const line = lines.find((candidate) => !/^To \S+$/u.test(candidate)) ?? lines[0];
+  return (line ?? "").replace(/^(?:fatal|error|warning):\s*/iu, "").replace(/^!\s+/u, "");
 }
 
 export function classifyGitFailure(input: GitFailureInput): GitError {

@@ -3,10 +3,21 @@
 // `gitArgvFor`, and the confirm dialog previews the same argv, so the two can
 // never drift.
 import type { LocalBranch, Overview, PullStrategy, RemoteBranch } from "../contracts";
+import { isValidRemoteName } from "./branch-name";
 
 // ---------------------------------------------------------------------------
 // Git plans: what the host is about to run.
 // ---------------------------------------------------------------------------
+
+/**
+ * A push always names its remote and refspec, so the user's push.default,
+ * remote.pushDefault and branch.*.pushRemote cannot change what it does. A
+ * tracked push needs the upstream branch name; the type makes a bare
+ * `git push` unrepresentable.
+ */
+export type PushPlan =
+  | { op: "push"; remote: string; setUpstream: true }
+  | { op: "push"; remote: string; setUpstream: false; upstreamBranch: string };
 
 export type GitPlan =
   | { op: "switch"; name: string }
@@ -14,20 +25,22 @@ export type GitPlan =
   | { op: "create"; name: string; startPoint: string | null; checkout: boolean }
   | { op: "fetch"; remote: string | null; prune: boolean }
   | { op: "pull"; strategy: PullStrategy; autoStash: boolean }
-  | { op: "push"; remote: string; setUpstream: boolean };
+  | PushPlan;
 
 export function gitArgvFor(plan: GitPlan): string[] {
   switch (plan.op) {
     case "switch":
       return ["switch", "--no-guess", "--end-of-options", plan.name];
     case "switch-track":
+      // The full ref: a tag named like the branch would make the short name
+      // ambiguous.
       return [
         "switch",
         "-c",
         plan.branch,
         "--track",
         "--end-of-options",
-        `${plan.remote}/${plan.branch}`,
+        `refs/remotes/${plan.remote}/${plan.branch}`,
       ];
     case "create": {
       const start = plan.startPoint === null ? [] : [plan.startPoint];
@@ -54,8 +67,46 @@ export function gitArgvFor(plan: GitPlan): string[] {
     case "push":
       return plan.setUpstream
         ? ["push", "--no-progress", "-u", "--end-of-options", plan.remote, "HEAD"]
-        : ["push", "--no-progress"];
+        : ["push", "--no-progress", "--end-of-options", plan.remote, `HEAD:refs/heads/${plan.upstreamBranch}`];
   }
+}
+
+export interface PushIntent {
+  plan: PushPlan;
+  /** The branch being pushed; the host refuses if HEAD moved elsewhere. */
+  branch: string;
+  /** `<remote>/<branch>` the push will update or create. */
+  target: string;
+  /** Why the plan sets an upstream, for the dialog copy. */
+  reason: "tracked" | "no-upstream" | "gone" | "local-upstream";
+}
+
+/**
+ * Decides what a push does from the overview the dialog shows: push to the
+ * tracked branch when it exists on a configured remote, otherwise create
+ * `<defaultRemote>/<branch>` and track it. null when HEAD is not on a branch.
+ */
+export function pushIntentFor(overview: Overview, defaultRemote: string): PushIntent | null {
+  if (overview.head?.kind !== "branch") return null;
+  const branch = overview.head.name;
+  const upstream = overview.upstream;
+  const create = (reason: PushIntent["reason"]): PushIntent => ({
+    plan: { op: "push", remote: defaultRemote, setUpstream: true },
+    branch,
+    target: `${defaultRemote}/${branch}`,
+    reason,
+  });
+  if (upstream === null) return create("no-upstream");
+  if (upstream.gone) return create("gone");
+  if (upstream.remote === null || upstream.branch === null || !isValidRemoteName(upstream.remote)) {
+    return create("local-upstream");
+  }
+  return {
+    plan: { op: "push", remote: upstream.remote, setUpstream: false, upstreamBranch: upstream.branch },
+    branch,
+    target: `${upstream.remote}/${upstream.branch}`,
+    reason: "tracked",
+  };
 }
 
 /** Human-readable preview of the command, for confirm dialogs and logs. */

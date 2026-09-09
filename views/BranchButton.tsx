@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOverview } from "../hooks/use-overview";
 import { useSidebarThread } from "../hooks/use-sidebar-thread";
 import { useVcsActions } from "../hooks/use-vcs-actions";
-import { OPEN_EVENT, isOpenEventDetail } from "../lib/events";
+import { OPEN_EVENT, takeOpenRequest } from "../lib/events";
 import { headLabel, type QuickActionId } from "../shared/model";
 import { BranchPopup } from "./BranchPopup";
 import type { BranchEntry } from "./BranchRow";
@@ -28,26 +28,40 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
   const [everOpened, setEverOpened] = useState(false);
   const [pendingAction, setPendingAction] = useState<QuickActionId | null>(null);
 
-  const { overview, loading, error, applyOverview } = useOverview({
+  // Hidden and archived threads are not in bb's sidebar list, so their label
+  // can only come from the overview.
+  const offSidebar = sidebar.status === "ready" && !sidebar.found;
+  const { overview, loading, error, refetch, applyOverview } = useOverview({
     threadId,
     environmentId: sidebar.environmentId,
-    enabled: everOpened,
+    enabled: everOpened || offSidebar,
   });
 
   const close = useCallback(() => setOpen(false), []);
   const actions = useVcsActions({ threadId, overview, applyOverview, onCheckedOut: close });
 
+  const everOpenedRef = useRef(everOpened);
+  everOpenedRef.current = everOpened;
+  const clearStatus = actions.clearStatus;
+  const openPopup = useCallback(() => {
+    // Reopening: forget the last action's outcome and read the repository
+    // again, so a lock or an external checkout shows without an action.
+    clearStatus();
+    if (everOpenedRef.current) void refetch();
+    setEverOpened(true);
+    setOpen(true);
+  }, [clearStatus, refetch]);
+
   useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<unknown>).detail;
-      if (!isOpenEventDetail(detail) || detail.threadId !== threadId) return;
-      setEverOpened(true);
-      setOpen(true);
-      if (detail.action) setPendingAction(detail.action);
+    const handler = () => {
+      const request = takeOpenRequest(threadId);
+      if (request === null) return;
+      openPopup();
+      if (request.action) setPendingAction(request.action);
     };
     window.addEventListener(OPEN_EVENT, handler);
     return () => window.removeEventListener(OPEN_EVENT, handler);
-  }, [threadId]);
+  }, [openPopup, threadId]);
 
   // A confirm dialog replaces the popup, as IntelliJ's push dialog does.
   useEffect(() => {
@@ -57,7 +71,7 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
   // A thread without an environment has nothing to show.
   if (sidebar.status === "ready" && sidebar.found && sidebar.environmentId === null) return null;
 
-  const label = headLabel(overview, sidebar.branchName);
+  const label = headLabel(overview, sidebar.found ? sidebar.branchName : loading ? "…" : "Branches");
   const title = [overview?.repoName ?? sidebar.environmentName, sidebar.hostName]
     .filter((part): part is string => typeof part === "string" && part.length > 0)
     .join(" on ");
@@ -91,8 +105,8 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
       <Popover
         open={open}
         onOpenChange={(next) => {
-          setOpen(next);
-          if (next) setEverOpened(true);
+          if (next) openPopup();
+          else setOpen(false);
         }}
       >
         <PopoverTrigger asChild>
@@ -117,6 +131,7 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
           </Button>
         </PopoverTrigger>
         <BranchPopup
+          open={open}
           overview={overview}
           loading={loading}
           loadError={error}

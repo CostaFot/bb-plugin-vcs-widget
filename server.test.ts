@@ -65,6 +65,7 @@ function setup(options: {
 } = {}) {
   const hostCalls: HostCall[] = [];
   const subscriptions: Subscription[] = [];
+  const released = { count: 0 };
   const environment = options.environment === undefined ? READY_ENVIRONMENT : options.environment;
   const { bb, harness } = createFakePluginHost({
     pluginId: "vcs-group",
@@ -78,7 +79,9 @@ function setup(options: {
       },
       subscribe: ((args: Subscription) => {
         subscriptions.push(args);
-        return () => {};
+        return () => {
+          released.count += 1;
+        };
       }) as never,
     },
     experimental_callHostRpc: (call) => {
@@ -86,7 +89,7 @@ function setup(options: {
       return options.hostResult ? options.hostResult(call) : defaultHostResult(call);
     },
   });
-  return { bb, harness, hostCalls, subscriptions };
+  return { bb, harness, hostCalls, subscriptions, released };
 }
 
 function defaultHostResult(call: HostCall): unknown {
@@ -189,14 +192,55 @@ describe("server", () => {
     await plugin(bb);
     await harness.behavior.callRpc("pull", { threadId: "t1", strategy: null, autoStash: null });
     await harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null });
-    await harness.behavior.callRpc("push", { threadId: "t1", remote: null, setUpstream: true });
+    await harness.behavior.callRpc("push", { threadId: "t1", remote: null, setUpstream: true, expectedBranch: "main" });
+    await harness.behavior.callRpc("push", { threadId: "t1", remote: "mirror", setUpstream: false, expectedBranch: "main" });
     await harness.behavior.callRpc("pull", { threadId: "t1", strategy: "ff-only", autoStash: false });
     expect(hostCalls.map((call) => [call.method, call.input])).toEqual([
       ["pull", { repoPath: "/repo", strategy: "rebase", autoStash: true }],
       ["fetch", { repoPath: "/repo", remote: null, prune: false }],
-      ["push", { repoPath: "/repo", remote: "upstream", setUpstream: true }],
+      ["push", { repoPath: "/repo", remote: "upstream", setUpstream: true, expectedBranch: "main" }],
+      ["push", { repoPath: "/repo", remote: "mirror", setUpstream: false, expectedBranch: "main" }],
       ["pull", { repoPath: "/repo", strategy: "ff-only", autoStash: false }],
     ]);
+  });
+
+  it("turns a host transport failure into a typed result and still refreshes", async () => {
+    const { bb, harness } = setup({
+      hostResult: () => {
+        throw new Error("host plugin call 1234 exceeded its deadline");
+      },
+    });
+    await plugin(bb);
+    const result = (await harness.behavior.callRpc("pull", { threadId: "t1", strategy: null, autoStash: null })) as ActionResult;
+    expect(result).toMatchObject({ ok: false, error: { code: "timeout" }, overview: null });
+    if (!result.ok) {
+      expect(result.error.message).toMatch(/did not report back/u);
+      expect(result.error.hint).toMatch(/may still have completed/u);
+    }
+    // The pull may well have finished on the host: nudge bb and tell open popups.
+    expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(1);
+    expect(harness.realtimeSignals).toContainEqual({
+      channel: "changed",
+      payload: { environmentId: "env1", reason: "pull:unknown" },
+    });
+    const offline = setup({
+      hostResult: () => {
+        throw new Error("host h1 is offline");
+      },
+    });
+    await plugin(offline.bb);
+    const other = (await offline.harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null })) as ActionResult;
+    expect(other).toMatchObject({ ok: false, error: { code: "git_failed" } });
+  });
+
+  it("tells open popups to refetch when the host worker exits unexpectedly", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    await harness.behavior.experimental_emitHostWorkerExit("h1");
+    expect(harness.realtimeSignals).toContainEqual({
+      channel: "changed",
+      payload: { hostId: "h1", reason: "worker-exit" },
+    });
   });
 
   it("republishes bb's git change events on the plugin channel", async () => {
@@ -213,11 +257,16 @@ describe("server", () => {
   });
 
   it("disposes timers and the subscription cleanly", async () => {
-    const { bb, harness } = setup();
+    const { bb, harness, released, subscriptions } = setup();
     await plugin(bb);
     await harness.behavior.callRpc("checkout", { threadId: "t1", target: { kind: "local", name: "main" } });
     await harness.lifecycle.dispose();
+    expect(released.count).toBe(1);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(1);
+    // An event still in flight after dispose must neither throw nor publish.
+    const before = harness.realtimeSignals.length;
+    expect(() => subscriptions[0]?.callback({ type: "changed", entity: "environment", id: "env9", changes: ["git-refs-changed"] })).not.toThrow();
+    expect(harness.realtimeSignals.length).toBe(before);
   });
 });

@@ -8,6 +8,7 @@
 // build rejects private @bb/* packages.
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { PULL_STRATEGIES } from "./shared/constants";
 import {
   MAX_BRANCH_NAME_LENGTH,
   isValidGitBranchName,
@@ -86,7 +87,22 @@ export const overviewSchema = z
     head: headSchema.nullable(),
     operation: operationSchema,
     indexLocked: z.boolean(),
-    upstream: z.object({ name: z.string(), ahead: count, behind: count }).strict().nullable(),
+    /**
+     * The current branch's upstream. `remote`/`branch` are null when the
+     * upstream is not `<configured remote>/<branch>` (a local upstream);
+     * `gone` when the remote-tracking ref no longer exists.
+     */
+    upstream: z
+      .object({
+        name: z.string(),
+        remote: z.string().nullable(),
+        branch: z.string().nullable(),
+        ahead: count,
+        behind: count,
+        gone: z.boolean(),
+      })
+      .strict()
+      .nullable(),
     workingTree: z
       .object({ staged: count, unstaged: count, untracked: count, conflicted: count })
       .strict(),
@@ -121,6 +137,7 @@ export const GIT_ERROR_CODES = [
   "timeout",
   "cancelled",
   "not_a_repo",
+  "head_changed",
   "git_failed",
 ] as const;
 export const gitErrorCodeSchema = z.enum(GIT_ERROR_CODES);
@@ -134,8 +151,10 @@ export const gitErrorSchema = z
   })
   .strict();
 
+// `overview` is null on success only when the host ran out of time to read
+// the repository afterwards; the app then refetches.
 export const actionResultSchema = z.union([
-  z.object({ ok: z.literal(true), message: z.string(), overview: overviewSchema }).strict(),
+  z.object({ ok: z.literal(true), message: z.string(), overview: overviewSchema.nullable() }).strict(),
   z
     .object({ ok: z.literal(false), error: gitErrorSchema, overview: overviewSchema.nullable() })
     .strict(),
@@ -152,8 +171,19 @@ export const checkoutTargetSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
-export const PULL_STRATEGIES = ["ff-only", "rebase", "merge"] as const;
+export { PULL_STRATEGIES };
 export const pullStrategySchema = z.enum(PULL_STRATEGIES);
+
+/**
+ * Push is the one action whose previewed command must equal the executed one.
+ * `expectedBranch` is the branch the dialog named; `setUpstream` false means
+ * "push HEAD to the upstream that existed when the dialog was shown", and the
+ * host refuses (typed) rather than improvising when either no longer holds.
+ */
+const pushFields = {
+  setUpstream: z.boolean(),
+  expectedBranch: branchNameSchema,
+};
 
 const createBranchFields = {
   name: branchNameSchema,
@@ -195,9 +225,8 @@ export const rpcContract = defineRpcContract({
     output: actionResultSchema,
   },
   push: {
-    input: threadInput
-      .extend({ remote: remoteNameSchema.nullable(), setUpstream: z.boolean() })
-      .strict(),
+    /** remote null = the default-remote setting (only meaningful with setUpstream). */
+    input: threadInput.extend({ remote: remoteNameSchema.nullable(), ...pushFields }).strict(),
     output: actionResultSchema,
   },
 });
@@ -232,7 +261,7 @@ export const hostContract = defineRpcContract({
     output: actionResultSchema,
   },
   push: {
-    input: repoInput.extend({ remote: remoteNameSchema, setUpstream: z.boolean() }).strict(),
+    input: repoInput.extend({ remote: remoteNameSchema, ...pushFields }).strict(),
     output: actionResultSchema,
   },
 });
@@ -251,6 +280,7 @@ export type GitError = z.infer<typeof gitErrorSchema>;
 export type ActionResult = z.infer<typeof actionResultSchema>;
 export type CheckoutTarget = z.infer<typeof checkoutTargetSchema>;
 export type PullStrategy = z.infer<typeof pullStrategySchema>;
+export type Upstream = NonNullable<Overview["upstream"]>;
 
 /** An overview for a thread without a usable repository. */
 export function unavailableOverview(reason: string): Overview {

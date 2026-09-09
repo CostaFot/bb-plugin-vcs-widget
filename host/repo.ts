@@ -1,8 +1,9 @@
 // Repository resolution, pre-flight checks and the overview read.
 import { stat } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import type { GitError, LocalBranch, Operation, Overview, RemoteBranch } from "../contracts";
-import { classifyGitFailure, pluginGitError } from "../shared/git-errors";
+import type { GitError, LocalBranch, Operation, Overview, RemoteBranch, Upstream } from "../contracts";
+import { isValidRemoteName } from "../shared/branch-name";
+import { classifyGitFailure, firstStderrLine, hintFor, pluginGitError } from "../shared/git-errors";
 import type { GitPhase } from "../shared/git-errors";
 import {
   FOR_EACH_REF_FORMAT,
@@ -12,7 +13,7 @@ import {
   parseStatusV2,
   splitRemoteRef,
 } from "../shared/parse";
-import { DEADLINES_MS, gitReadOrNull, runGit } from "./git";
+import { gitReadOrNull, runGit } from "./git";
 
 export interface RepoInfo {
   /** The worktree root (`--show-toplevel`). */
@@ -27,19 +28,30 @@ const LOCAL_LIMIT = 2000;
 const REMOTE_LIMIT = 5000;
 const REFLOG_LINES = 300;
 
-let cachedGitVersion: string | null | undefined;
+// Only a successful read is cached: a cancelled or timed-out first read must
+// not report "unknown git" for the worker's lifetime.
+let cachedGitVersion: string | null = null;
 
-export async function gitVersion(cwd: string, signal?: AbortSignal): Promise<string | null> {
-  if (cachedGitVersion !== undefined) return cachedGitVersion;
-  const raw = await gitReadOrNull(["--version"], { cwd, timeoutMs: DEADLINES_MS.read, signal });
-  cachedGitVersion = raw === null ? null : parseGitVersion(raw);
-  return cachedGitVersion;
+export async function gitVersion(cwd: string, options: { signal?: AbortSignal; timeoutMs: number }): Promise<string | null> {
+  if (cachedGitVersion !== null) return cachedGitVersion;
+  if (options.signal?.aborted) return null;
+  const raw = await gitReadOrNull(["--version"], { cwd, timeoutMs: options.timeoutMs, signal: options.signal });
+  const parsed = raw === null ? null : parseGitVersion(raw);
+  if (parsed !== null) cachedGitVersion = parsed;
+  return parsed;
+}
+
+export interface ReadOptions {
+  signal?: AbortSignal;
+  /** Deadline for each git command in this read. */
+  timeoutMs: number;
 }
 
 export async function resolveRepo(
   repoPath: string,
-  signal?: AbortSignal,
+  options: ReadOptions,
 ): Promise<RepoInfo | { error: GitError }> {
+  const { signal, timeoutMs } = options;
   if (!isAbsolute(repoPath)) {
     return { error: pluginGitError("not_a_repo", "The thread environment has no absolute workspace path.", "read") };
   }
@@ -53,14 +65,20 @@ export async function resolveRepo(
   }
   const result = await runGit(
     ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"],
-    { cwd: repoPath, timeoutMs: DEADLINES_MS.read, signal },
+    { cwd: repoPath, timeoutMs, signal },
   );
   if (result.code !== 0) {
     const classified = classifyGitFailure({ phase: "read", exitCode: result.code, stderr: result.stderr, timedOut: result.timedOut, cancelled: result.cancelled });
-    if (classified.code === "git_failed" && /not a git repository|bare repository/iu.test(result.stderr)) {
-      return { error: { ...classified, code: "not_a_repo" } };
-    }
-    return { error: classified.code === "git_failed" ? { ...classified, code: "not_a_repo", message: "The thread workspace is not inside a git repository." } : classified };
+    if (classified.code !== "git_failed") return { error: classified };
+    // Keep git's own words: "must be run in a work tree" (bare repository) or
+    // "dubious ownership" (safe.directory) send the user somewhere useful.
+    const detail = firstStderrLine(result.stderr);
+    const message = /not a git repository/iu.test(result.stderr)
+      ? "The thread workspace is not inside a git repository."
+      : detail
+        ? `The thread workspace cannot be used as a git worktree: ${detail}`
+        : "The thread workspace is not inside a git repository.";
+    return { error: { ...classified, code: "not_a_repo", message, hint: hintFor("not_a_repo", "read") } };
   }
   const [toplevel = "", gitDir = "", commonDir = ""] = result.stdout.split("\n").map((line) => line.trim());
   if (toplevel === "") {
@@ -119,10 +137,10 @@ export async function preflight(
 
 export async function readOverview(
   repo: RepoInfo,
-  options: { recentLimit: number; signal?: AbortSignal },
+  options: ReadOptions & { recentLimit: number },
 ): Promise<Overview> {
   const cwd = repo.repoRoot;
-  const read = { cwd, timeoutMs: DEADLINES_MS.read, signal: options.signal };
+  const read = { cwd, timeoutMs: options.timeoutMs, signal: options.signal };
   const [
     version,
     headsRaw,
@@ -133,11 +151,13 @@ export async function readOverview(
     operation,
     indexLocked,
   ] = await Promise.all([
-    gitVersion(cwd, options.signal),
+    gitVersion(cwd, read),
     runGit(["for-each-ref", "--sort=-committerdate", `--count=${LOCAL_LIMIT}`, `--format=${FOR_EACH_REF_FORMAT}`, "refs/heads"], read),
     runGit(["for-each-ref", "--sort=-committerdate", `--count=${REMOTE_LIMIT}`, `--format=${FOR_EACH_REF_FORMAT}`, "refs/remotes"], read),
     runGit(["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"], read),
-    gitReadOrNull(["reflog", "show", "--format=%gs", `-n`, String(REFLOG_LINES), "HEAD"], read),
+    // The trailing "--" keeps a file called HEAD in the worktree from making
+    // the revision ambiguous.
+    gitReadOrNull(["reflog", "show", "--format=%gs", `-n`, String(REFLOG_LINES), "HEAD", "--"], read),
     gitReadOrNull(["remote"], read),
     detectOperation(repo.gitDir),
     isIndexLocked(repo.gitDir),
@@ -197,10 +217,18 @@ export async function readOverview(
 
   const currentName = head?.kind === "branch" || head?.kind === "unborn" ? head.name : null;
   const currentLocal = currentName === null ? undefined : local.find((branch) => branch.name === currentName);
-  const upstream =
+  // `status` keeps printing branch.upstream after the remote-tracking ref is
+  // deleted; for-each-ref's "[gone]" on the local row is the truth.
+  const upstream: Upstream | null =
     status.upstream === null
       ? null
-      : { name: status.upstream, ahead: status.ahead || currentLocal?.ahead || 0, behind: status.behind || currentLocal?.behind || 0 };
+      : {
+          name: status.upstream,
+          ...upstreamParts(status.upstream, remotes),
+          ahead: status.ahead || currentLocal?.ahead || 0,
+          behind: status.behind || currentLocal?.behind || 0,
+          gone: currentLocal?.gone ?? false,
+        };
 
   return {
     unavailableReason: null,
@@ -227,6 +255,18 @@ export async function readOverview(
     remotes,
     truncated: { local: headRows.length >= LOCAL_LIMIT, remote: remoteRows.length >= REMOTE_LIMIT },
   };
+}
+
+/**
+ * Splits `origin/feature` into a configured remote and its branch. A local
+ * upstream (`main`, or `.`-remote tracking) has no remote to push to.
+ */
+export function upstreamParts(name: string, remotes: readonly string[]): { remote: string | null; branch: string | null } {
+  const match = [...remotes]
+    .filter((remote) => isValidRemoteName(remote))
+    .sort((a, b) => b.length - a.length)
+    .find((remote) => name.startsWith(`${remote}/`) && name.length > remote.length + 1);
+  return match ? { remote: match, branch: name.slice(match.length + 1) } : { remote: null, branch: null };
 }
 
 export class OverviewReadError extends Error {

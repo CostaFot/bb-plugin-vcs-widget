@@ -7,10 +7,19 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 afterEach(() => cleanup());
 import type { ActionResult, Overview } from "./contracts";
 import { unavailableOverview } from "./contracts";
+import { requestOpen } from "./lib/events";
 import type { rpcContract } from "./server";
 
 // jsdom lacks the layout APIs Radix and cmdk touch.
 beforeAll(() => {
+  // nwsapi implements ':modal' by re-entering Element.matches until it
+  // overflows the stack (~300 ms per call); floating-ui asks for it on every
+  // ancestor while Radix positions the popover, which cost 25 s per open.
+  const nativeMatches = Element.prototype.matches;
+  Element.prototype.matches = function matches(this: Element, selector: string) {
+    if (selector === ":modal" || selector === ":popover-open" || selector === ":fullscreen") return false;
+    return nativeMatches.call(this, selector);
+  };
   class ResizeObserverStub {
     observe() {}
     unobserve() {}
@@ -58,7 +67,7 @@ function overview(extra: Partial<Overview> = {}): Overview {
     repoName: "repo",
     gitVersion: "2.55.0",
     head: { kind: "branch", name: "main", sha: "abc1234" },
-    upstream: { name: "origin/main", ahead: 0, behind: 0 },
+    upstream: { name: "origin/main", remote: "origin", branch: "main", ahead: 0, behind: 0, gone: false },
     remotes: ["origin"],
     local: [branch("main", true), branch("feature"), branch("release")],
     remote: [
@@ -116,13 +125,16 @@ function render(options: {
   checkout?: (input: unknown) => ActionResult;
   environment?: { id: string; branchName: string } | null;
   compact?: boolean;
+  /** The thread is hidden or archived: absent from bb's sidebar list. */
+  offSidebar?: boolean;
 } = {}) {
   const view = options.overview ?? overview();
+  const sidebar = sidebarThread(options.environment === undefined ? { id: "env1", branchName: "main" } : options.environment);
   return renderSlot<typeof props, typeof rpcContract>(
     app.threadHeaderActions[0]!,
     { ...props, isCompactViewport: options.compact ?? false },
     {
-      sidebarThreads: sidebarThread(options.environment === undefined ? { id: "env1", branchName: "main" } : options.environment),
+      sidebarThreads: options.offSidebar ? { ...sidebar, threads: [] } : sidebar,
       settings: { updateStrategy: "ff-only", autoStash: false, confirmBeforePush: true, defaultRemote: "origin", fetchPrune: true },
       rpc: {
         overview: () => view,
@@ -239,5 +251,98 @@ describe("BranchButton", () => {
     expect(preview.textContent).toContain("git push --no-progress -u --end-of-options origin HEAD");
     await user.click(screen.getByText("Cancel"));
     expect(slot.inspection.rpcCalls.map((call) => call.method)).toEqual(["overview"]);
+  });
+
+  it("pushes a tracked branch by explicit refspec and names the branch it showed", async () => {
+    const user = userEvent.setup();
+    const slot = render();
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    const popup = await screen.findByTestId("vcs-branch-popup");
+    await user.click(await within(popup).findByText("Push..."));
+    const preview = await screen.findByTestId("vcs-command-preview");
+    expect(preview.textContent).toBe("git push --no-progress --end-of-options origin HEAD:refs/heads/main");
+    await user.click(screen.getByText("Push", { selector: "button" }));
+    await waitFor(() =>
+      expect(slot.inspection.rpcCalls.at(-1)).toEqual({
+        method: "push",
+        input: { threadId: "t1", remote: "origin", setUpstream: false, expectedBranch: "main" },
+      }),
+    );
+  });
+
+  it("runs a palette request only once the overview is loaded and the row is enabled", async () => {
+    const slot = render();
+    act(() => requestOpen({ threadId: "t1", action: "fetch" }));
+    await screen.findByTestId("vcs-branch-popup");
+    await waitFor(() => expect(slot.inspection.rpcCalls.map((call) => call.method)).toEqual(["overview", "fetch"]));
+  });
+
+  it("refuses a palette request the popup row would refuse", async () => {
+    const slot = render({ overview: overview({ remotes: [] }) });
+    act(() => requestOpen({ threadId: "t1", action: "push" }));
+    const popup = await screen.findByTestId("vcs-branch-popup");
+    await within(popup).findByText("Push...");
+    await new Promise((done) => setTimeout(done, 50));
+    expect(screen.queryByTestId("vcs-command-preview")).toBeNull();
+    expect(slot.inspection.rpcCalls.map((call) => call.method)).toEqual(["overview"]);
+  });
+
+  it("ignores a window event that carries its own detail", async () => {
+    const slot = render();
+    act(() => {
+      window.dispatchEvent(new CustomEvent("vcs-group:open", { detail: { threadId: "t1", action: "fetch" } }));
+    });
+    await new Promise((done) => setTimeout(done, 50));
+    expect(screen.queryByTestId("vcs-branch-popup")).toBeNull();
+    expect(slot.inspection.rpcCalls).toEqual([]);
+  });
+
+  it("reads the repository again and forgets the last outcome when reopened", async () => {
+    const user = userEvent.setup();
+    const slot = render({
+      checkout: () => ({ ok: false, error: { code: "index_locked", message: "The repository index is locked." }, overview: overview() }),
+    });
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    let popup = await screen.findByTestId("vcs-branch-popup");
+    await waitFor(() => expect(slot.inspection.rpcCalls).toHaveLength(1));
+    const [featureRow] = await within(popup).findAllByText("feature");
+    await user.click(featureRow!);
+    await within(popup).findByText("The repository index is locked.");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("vcs-branch-popup")).toBeNull());
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    popup = await screen.findByTestId("vcs-branch-popup");
+    await waitFor(() => expect(slot.inspection.rpcCalls.map((call) => call.method)).toEqual(["overview", "checkout", "overview"]));
+    expect(within(popup).queryByText("The repository index is locked.")).toBeNull();
+    expect((within(popup).getByLabelText("Search for branches and actions") as HTMLInputElement).value).toBe("");
+  });
+
+  it("returns from the New Branch step on Escape instead of closing", async () => {
+    const user = userEvent.setup();
+    const slot = render();
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    const popup = await screen.findByTestId("vcs-branch-popup");
+    await user.click(await within(popup).findByText("New Branch..."));
+    await within(popup).findByLabelText("New branch name");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("vcs-branch-popup")).not.toBeNull();
+    await within(popup).findByLabelText("Search for branches and actions");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("vcs-branch-popup")).toBeNull());
+  });
+
+  it("hides the Local heading while a filter matches no local branch", async () => {
+    const user = userEvent.setup();
+    const slot = render();
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    const popup = await screen.findByTestId("vcs-branch-popup");
+    await user.type(within(popup).getByLabelText("Search for branches and actions"), "hotfix");
+    await waitFor(() => expect(within(popup).queryByText("Local")).toBeNull());
+    expect(within(popup).getByText("Remote")).toBeTruthy();
+  });
+
+  it("reads the overview for a thread bb's sidebar does not list", async () => {
+    const slot = render({ offSidebar: true, overview: overview({ head: { kind: "branch", name: "hidden-branch", sha: "abc1234" } }) });
+    await waitFor(() => expect(slot.getByTestId("vcs-branch-button").textContent).toContain("hidden-branch"));
   });
 });

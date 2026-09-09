@@ -1,7 +1,5 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-
-/** Realtime channel the app listens on; payload `{ environmentId, reason }`. */
-export const CHANGED_CHANNEL = "changed";
+import { CHANGED_CHANNEL, type ChangedPayload } from "../shared/constants";
 
 /**
  * bb serves environment status from a short read cache, and only a cache
@@ -10,11 +8,6 @@ export const CHANGED_CHANNEL = "changed";
  */
 export const STATUS_CACHE_TTL_MS = 3_000;
 const SECOND_NUDGE_DELAY_MS = STATUS_CACHE_TTL_MS + 200;
-
-export interface ChangedPayload {
-  environmentId: string;
-  reason: string;
-}
 
 export function createAfterMutation(bb: BbPluginApi) {
   const timers = new Set<ReturnType<typeof setTimeout>>();

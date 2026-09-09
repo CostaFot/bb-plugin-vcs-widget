@@ -2,15 +2,9 @@
 // to the host worker on the machine that owns the worktree, and tells open
 // app pages when the repository changed.
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import {
-  PULL_STRATEGIES,
-  hostContract,
-  rpcContract,
-  unavailableOverview,
-  type ActionResult,
-  type PullStrategy,
-} from "./contracts";
+import { hostContract, rpcContract, unavailableOverview, type ActionResult } from "./contracts";
 import { isValidRemoteName } from "./shared/branch-name";
+import { CHANGED_CHANNEL, PULL_STRATEGIES, isPullStrategy } from "./shared/constants";
 import { hintFor } from "./shared/git-errors";
 import { createAfterMutation } from "./server/after-mutation";
 import { RepositoryUnavailableError, repositoryForThread, type RepositoryTarget } from "./server/repo-target";
@@ -20,8 +14,17 @@ export { rpcContract } from "./contracts";
 
 const RECENT_LIMIT = 8;
 
-function isPullStrategy(value: string): value is PullStrategy {
-  return (PULL_STRATEGIES as readonly string[]).includes(value);
+const VERB: Record<string, string> = {
+  checkout: "The checkout",
+  createBranch: "Creating the branch",
+  fetch: "The fetch",
+  pull: "Update Project",
+  push: "The push",
+};
+
+function isDeadlineFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (error instanceof Error && error.name === "AbortError") || /deadline|timed? ?out|cancel/iu.test(message);
 }
 
 export default async function plugin(bb: BbPluginApi) {
@@ -94,10 +97,33 @@ export default async function plugin(bb: BbPluginApi) {
       if (error instanceof RepositoryUnavailableError) return unavailableResult(error.message);
       throw error;
     }
-    const result = await run(target);
+    // Every mutation is visible in the plugin log with the thread that asked
+    // for it: the RPC route is local-auth like all of bb's API, so this is the
+    // audit trail, not a guard (see README, "Safety model").
+    bb.log.info(`${reason} requested for thread ${threadId} on ${target.hostId}:${target.repoPath}`);
+    let result: ActionResult;
+    try {
+      result = await run(target);
+    } catch (error) {
+      // bb's 30 s deadline, an offline host or a crashed worker: the daemon
+      // cancels the call, it does not undo git. Report a typed result and
+      // refresh, because the mutation may well have completed.
+      const message = error instanceof Error ? error.message : String(error);
+      bb.log.warn(`${reason} on ${target.environmentId} did not report back: ${message}`);
+      changes.afterMutation(target.environmentId, `${reason}:unknown`);
+      return {
+        ok: false,
+        error: {
+          code: isDeadlineFailure(error) ? "timeout" : "git_failed",
+          message: `${VERB[reason] ?? reason} did not report back: ${message}`,
+          hint: "The command may still have completed on the host; the branch list refreshes automatically.",
+        },
+        overview: null,
+      };
+    }
     if (result.ok) {
       changes.afterMutation(target.environmentId, reason);
-    } else if (result.overview !== null) {
+    } else if (result.overview !== null || result.error.code === "timeout") {
       // A failed pull can still leave the tree changed; let other panes know.
       changes.publish(target.environmentId, `${reason}:failed`);
     }
@@ -157,27 +183,37 @@ export default async function plugin(bb: BbPluginApi) {
       );
     },
 
-    async push({ threadId, remote, setUpstream }) {
+    async push({ threadId, remote, setUpstream, expectedBranch }) {
       const defaults = await effectiveSettings();
       return withTarget(threadId, "push", (repo) =>
         host.call(
           "push",
-          { repoPath: repo.repoPath, remote: remote ?? defaults.defaultRemote, setUpstream },
+          { repoPath: repo.repoPath, remote: remote ?? defaults.defaultRemote, setUpstream, expectedBranch },
           { hostId: repo.hostId },
         ),
       );
     },
   });
 
+  // A crashed worker may have left a mutation half-reported; tell every open
+  // popup to refetch (a payload without environmentId means "everyone").
+  const offWorkerExit = host.experimental_onWorkerExit(({ hostId }) => {
+    bb.log.warn(`host worker on ${hostId} exited unexpectedly`);
+    bb.realtime.publish(CHANGED_CHANNEL, { hostId, reason: "worker-exit" });
+  });
+
   // bb's daemon watches every environment and reports git ref and work-tree
   // changes (agent checkouts, terminal commits). Republish them on our channel
   // so open popups refetch without polling.
+  let disposed = false;
   let unsubscribe: (() => void) | null = null;
   try {
     unsubscribe = bb.sdk.subscribe({
       event: "environment:changed",
       callback: (event) => {
-        if (event.id === undefined) return;
+        // An event already in flight when the plugin reloads must not touch
+        // a stale API handle.
+        if (disposed || event.id === undefined) return;
         if (event.changes.includes("git-refs-changed") || event.changes.includes("work-status-changed")) {
           changes.publish(event.id, "environment-changed");
         }
@@ -192,7 +228,9 @@ export default async function plugin(bb: BbPluginApi) {
   }
 
   bb.onDispose(() => {
+    disposed = true;
     unsubscribe?.();
+    offWorkerExit();
     changes.dispose();
   });
 

@@ -11,6 +11,8 @@ describe("classifyGitFailure", () => {
     ["invalid_ref_name", "fatal: 'bad name' is not a valid branch name"],
     ["ref_not_found", "error: pathspec 'nope' did not match any file(s) known to git"],
     ["ref_not_found", "fatal: invalid reference: nope"],
+    ["ref_not_found", "warning: refname 'origin/main' is ambiguous.\nfatal: ambiguous object name: 'origin/main'"],
+    ["no_upstream", "Your configuration specifies to merge with the ref 'refs/heads/gone' from the remote, but no such ref was fetched."],
     ["no_upstream", "fatal: The current branch feat has no upstream branch.\nTo push the current branch and set the remote as upstream, use\n\n    git push --set-upstream origin feat"],
     ["no_upstream", "There is no tracking information for the current branch.\nPlease specify which branch you want to rebase against."],
     ["no_remote", "fatal: 'upstream' does not appear to be a git repository\nfatal: Could not read from remote repository."],
@@ -57,6 +59,12 @@ describe("firstStderrLine", () => {
     expect(firstStderrLine("hint: use --force\nfatal: real problem\nmore")).toBe("real problem");
     expect(firstStderrLine("")).toBe("");
   });
+  it("prefers the rejection reason over push's 'To <url>' line", () => {
+    expect(firstStderrLine("To ../o.git\n ! [rejected]        HEAD -> main (fetch first)\nerror: failed to push some refs to '../o.git'")).toBe(
+      "[rejected]        HEAD -> main (fetch first)",
+    );
+    expect(firstStderrLine("To ../o.git")).toBe("To ../o.git");
+  });
 });
 
 describe("pluginGitError", () => {
@@ -66,5 +74,6 @@ describe("pluginGitError", () => {
       message: "Busy.",
       hint: "Another VCS action on this repository is still running.",
     });
+    expect(pluginGitError("head_changed", "Moved.", "push").hint).toMatch(/Open it again/u);
   });
 });

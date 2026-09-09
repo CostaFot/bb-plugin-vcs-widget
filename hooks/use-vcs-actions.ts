@@ -1,14 +1,15 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRpc, useSettings } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
-import type { ActionResult, CheckoutTarget, GitError, Overview, PullStrategy } from "../contracts";
-import { PULL_STRATEGIES } from "../contracts";
+import type { ActionResult, CheckoutTarget, GitError, Overview } from "../contracts";
 import type { rpcContract } from "../server";
 import { isValidRemoteName } from "../shared/branch-name";
+import { isPullStrategy, type PullStrategy } from "../shared/constants";
 import {
   confirmTierFor,
   gitCommandPreview,
   hasUncommittedChanges,
+  pushIntentFor,
   type ConfirmTier,
   type GitPlan,
 } from "../shared/model";
@@ -49,10 +50,7 @@ function readSettings(values: Record<string, string | number | boolean> | undefi
   const strategy = values?.updateStrategy;
   const remote = values?.defaultRemote;
   return {
-    strategy:
-      typeof strategy === "string" && (PULL_STRATEGIES as readonly string[]).includes(strategy)
-        ? (strategy as PullStrategy)
-        : "ff-only",
+    strategy: isPullStrategy(strategy) ? strategy : "ff-only",
     autoStash: values?.autoStash === true,
     confirmBeforePush: values?.confirmBeforePush !== false,
     defaultRemote: typeof remote === "string" && isValidRemoteName(remote) ? remote : "origin",
@@ -66,6 +64,8 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut 
   const [status, setStatus] = useState<ActionStatus>({ kind: "idle" });
   const [confirm, setConfirm] = useState<(ConfirmRequest & { run: () => Promise<void> }) | null>(null);
   const busy = status.kind === "busy";
+  // One mutation at a time per pane, whatever path asked for it.
+  const inFlight = useRef(false);
 
   const execute = useCallback(
     async (
@@ -73,6 +73,11 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut 
       call: () => Promise<ActionResult>,
       options: { closeOnSuccess?: boolean } = {},
     ): Promise<ActionResult | null> => {
+      if (inFlight.current) {
+        toast.error("Another VCS action is still running.");
+        return null;
+      }
+      inFlight.current = true;
       setStatus({ kind: "busy", text: busyText });
       try {
         const result = await call();
@@ -91,6 +96,8 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut 
         setStatus({ kind: "error", error });
         toast.error(error.message);
         return null;
+      } finally {
+        inFlight.current = false;
       }
     },
     [applyOverview, onCheckedOut],
@@ -155,26 +162,38 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut 
   }, [execute, overview, requestOrRun, rpc, settings.autoStash, settings.confirmBeforePush, settings.strategy, threadId]);
 
   const push = useCallback(() => {
-    const branch = overview?.head?.kind === "branch" ? overview.head.name : "HEAD";
-    const setUpstream = overview?.upstream === null || overview?.upstream === undefined;
-    const plan: GitPlan = { op: "push", remote: settings.defaultRemote, setUpstream };
+    if (overview === null) return;
+    const intent = pushIntentFor(overview, settings.defaultRemote);
+    if (intent === null) {
+      toast.error("Check out a branch first.");
+      return;
+    }
+    const { plan, branch, target } = intent;
     const tier = confirmTierFor(plan, {
-      hasUncommittedChanges: overview !== null && hasUncommittedChanges(overview),
+      hasUncommittedChanges: hasUncommittedChanges(overview),
       confirmBeforePush: settings.confirmBeforePush,
     });
+    const description =
+      intent.reason === "tracked"
+        ? `Push ${branch} to ${target}.`
+        : intent.reason === "gone"
+          ? `The upstream ${overview.upstream?.name ?? ""} no longer exists. This creates ${target} and tracks it.`
+          : intent.reason === "local-upstream"
+            ? `${branch} tracks ${overview.upstream?.name ?? "a local branch"}, which is not on a remote. This creates ${target} and tracks it.`
+            : `${branch} has no upstream yet. This creates ${target} and tracks it.`;
     requestOrRun(
       {
-        title: setUpstream ? `Push ${branch} and set upstream` : `Push ${branch}`,
-        description: setUpstream
-          ? `${branch} has no upstream yet. This creates ${settings.defaultRemote}/${branch} and tracks it.`
-          : `Push ${branch} to ${overview?.upstream?.name ?? settings.defaultRemote}.`,
+        title: plan.setUpstream ? `Push ${branch} and set upstream` : `Push ${branch}`,
+        description,
         plan,
         tier,
         confirmLabel: "Push",
         command: gitCommandPreview(plan),
       },
       async () => {
-        await execute("Pushing…", () => rpc.call("push", { threadId, remote: null, setUpstream }));
+        await execute("Pushing…", () =>
+          rpc.call("push", { threadId, remote: plan.remote, setUpstream: plan.setUpstream, expectedBranch: branch }),
+        );
       },
     );
   }, [execute, overview, requestOrRun, rpc, settings.confirmBeforePush, settings.defaultRemote, threadId]);
@@ -186,7 +205,7 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut 
     if (pending) void pending.run();
   }, [confirm]);
 
-  const clearStatus = useCallback(() => setStatus({ kind: "idle" }), []);
+  const clearStatus = useCallback(() => setStatus((current) => (current.kind === "busy" ? current : { kind: "idle" })), []);
 
   return {
     status,
