@@ -1,24 +1,22 @@
-// Regenerates the README images from a running bb, so they can be refreshed
+// Refreshes the branch popup shot from a running bb, so it can be retaken
 // instead of redrawn:
 //
 //   VCS_E2E_THREAD=thr_x VCS_E2E_PROJECT=proj_x node scripts/screenshots.mjs
 //
 // With no argument it only photographs what the thread already shows and
-// never touches git — point it at a thread whose worktree has a couple of
-// uncommitted changes. Pass the scratch repository
-// path to have it stage a change first (it resets that repository, so never
-// pass one you care about).
+// never touches git. Pass the scratch repository path to have it stage a
+// change first (it resets that repository, so never pass one you care
+// about).
 //
-// Writes docs/screenshots/popup.png and settings.png. Needs system Chromium
-// and puppeteer-core, like the live checks (see docs/VERIFY.md). The diff
-// viewer is left unopened on purpose: headless Chromium has no code theme
-// registered, so it would photograph as an empty pane.
+// Writes docs/screenshots/popup.png, which scripts/combos.mjs and
+// scripts/hero.mjs then compose into the README's images. Needs system
+// Chromium and puppeteer-core, like the live checks (see docs/VERIFY.md).
 //
-// commit.png and log.png are deliberately not on that list. Both panels are
-// worth showing full: the commit one with a diff open, which is the thing
-// this script cannot photograph, and the log one with a real history and a
-// commit whose message fills the detail pane, which a scratch repository has
-// not got. Those two shots are taken by hand from a real browser and this
+// It is the only shot left on the list. The commit panel is worth showing
+// with a diff open, which headless Chromium photographs as an empty pane for
+// want of a code theme; the git log with a real history and a message that
+// fills the detail pane, which a scratch repository has not got; the settings
+// page with the sections read end to end. Those are hand-taken, and this
 // script must not overwrite them.
 import { mkdirSync } from "node:fs";
 import { GIT_ID, browserHelpers, sh, sleep } from "./live-lib.mjs";
@@ -27,7 +25,6 @@ const SCRATCH = process.argv[2] ?? null;
 const OUT = new URL("../docs/screenshots/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 const H = await browserHelpers();
-const BASE = process.env.BB_SERVER_URL ?? "http://127.0.0.1:38886";
 
 if (SCRATCH !== null) {
   sh(`git -C ${SCRATCH} switch -q main`);
@@ -48,15 +45,6 @@ try {
   await H.openPopup(page);
   await sleep(1200);
   await clip("popup", '[data-testid="vcs-branch-popup"]');
-
-  await page.goto(`${BASE}/settings/plugins/vcs-widget`, { waitUntil: "load", timeout: 60_000 });
-  await sleep(4000);
-  // Scroll past part of bb's own form so both plugin sections fit in frame.
-  await page.mouse.move(900, 500);
-  await page.mouse.wheel({ deltaY: 420 });
-  await sleep(1000);
-  await page.screenshot({ path: `${OUT}settings.png` });
-  console.log(`${OUT}settings.png`);
 } finally {
   await browser.close();
   if (SCRATCH !== null) {

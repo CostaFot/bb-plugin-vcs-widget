@@ -130,18 +130,20 @@ CLI, the settings sections, a 390 px pass) and `scripts/live-check-m6.mjs`
 a real message to the thread) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
 unique per run, the scratch repo is reused). `scripts/screenshots.mjs`
-regenerates `docs/screenshots/{popup,settings}.png` for the README; with
-no repository argument it touches no git. `commit.png` and `log.png` are
-hand-taken and the script leaves them alone: the commit shot is worth having
-with a diff open and headless Chromium photographs the diff viewer as an empty
-pane, and the log shot is worth having over a real history, which the scratch
-repo has not got. `scripts/hero.mjs` composes the README's header
+regenerates `docs/screenshots/popup.png`, the only shot it still takes; with
+no repository argument it touches no git. `commit.png`, `log.png`,
+`log-menu.png`, `branch-menu.png`, `new-branch.png`, `checkout-revision.png`
+and `settings.png` are hand-taken and the script leaves them alone: the commit
+shot is worth having with a diff open and headless Chromium photographs the
+diff viewer as an empty pane, the log shot over a real history, which the
+scratch repo has not got, and the rest are menus and dialogs it cannot open. `scripts/hero.mjs` composes the README's header
 image (`docs/screenshots/hero.png`) from those shots and `docs/hero/`
 (the background and the thread-header crop) by photographing a local HTML
-page, so it needs Chromium but no running bb. `scripts/popup-combo.mjs`
-composes `popup-combo.png`, the Popup section's one image, the same way, from
-`popup.png`, `branch-menu.png`, `new-branch.png` and `checkout-revision.png`
-— the four hand-taken shots the README no longer shows separately.
+page, so it needs Chromium but no running bb. `scripts/combos.mjs`
+composes the two section images the same way: `popup-combo.png` from
+`popup.png`, `branch-menu.png`, `new-branch.png` and `checkout-revision.png`,
+and `log-combo.png` from `log.png` and `log-menu.png`. Those six hand-taken
+shots stay in `docs/screenshots/`, but the README shows only the two sheets.
 
 Vendor UI with `npx shadcn add @bb/<name>` (registry pinned in
 `components.json`); components live in `components/ui/` and are ours to edit.

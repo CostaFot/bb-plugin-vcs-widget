@@ -59,7 +59,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 
 ## Git log
 
-<img src="docs/screenshots/log.png" alt="The git log panel with a commit selected" width="420">
+<img src="docs/screenshots/log-combo.png" alt="The git log panel with a commit selected, and the right-click menu on a commit" width="720">
 
 - Commits over all branches, the current branch or one branch, with the refs
   each commit carries as badges and a literal message filter. Rows are
@@ -70,8 +70,6 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 - Right-click a commit for Checkout Revision, New Branch from, Cherry-Pick,
   Revert Commit, Reset Current Branch to Here (Soft / Mixed / Hard), Compare
   with current and Copy Revision Number.
-
-<img src="docs/screenshots/log-menu.png" alt="The right-click menu on a commit in the git log" width="340">
 
 ## More
 
@@ -91,7 +89,7 @@ Abort and leaves the rest to your editor.
 
 ## Settings
 
-![The plugin's settings page](docs/screenshots/settings.png)
+<img src="docs/screenshots/settings.png" alt="The plugin's settings page" width="480">
 
 Under Settings → Installed plugins → VCS Widget:
 
