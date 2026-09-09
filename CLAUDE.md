@@ -23,7 +23,8 @@ comments (`claude: step N done, <what>`), never in files here.
   shipped 2026-09-09
 - COS-130 marketplace submission — open, and only on Costa's word
 - COS-142 hand-check the clipboard copies in a real browser (headless
-  Chromium denies the write, so no script can)
+  Chromium denies the write, so no script can) — done 2026-09-09, all three
+  pass
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4

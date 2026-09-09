@@ -268,8 +268,12 @@ Manual, on top of the script:
 
 Manual, on top of the script:
 
-8. Copy Path in a real browser window pastes the repository-relative path,
-   and the panel says "Copied <path>" (COS-142).
+8. The three clipboard copies in a real browser window (COS-142). Copy Path
+   on a file row pastes the repository-relative path and the panel's own
+   status line says "Copied <path>". Copy Branch Name on a branch row pastes
+   the branch name, `origin/<branch>` on a remote row, and toasts
+   "Copied <name>". Copy Revision Number on a log row pastes the full
+   40-character sha while the toast names the short one, as IntelliJ does.
 9. A group whose paths would outgrow one call (500 files, or long paths over
    256 KB of argv) is refused before the dialog with "Too many files for one
    discard."
@@ -295,6 +299,13 @@ Copy Branch Name and Copy Revision Number, which no script covers either.
 Scenario 7 first looked for the message in `bb thread history`, which
 collapses identical prompts, so a second run saw no new message; it reads the
 thread's event log now.
+
+Scenario 8 was hand-checked in a real browser window on 2026-09-09 and all
+three copies pass: the pastes are the repository-relative path, the branch
+name and the full 40-character sha, and each surface reports where it
+reports — the commit panel on its own status line, the popup and the log by
+toast. Nothing in the plugin needed changing; the headless denial really was
+Chromium's.
 
 Milestone 5's first run failed on the settings page because it looked for it
 at `/extensions/plugins/<id>`, which is the marketplace page; the plugin's
