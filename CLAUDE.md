@@ -14,13 +14,13 @@ in the issue descriptions, progress in issue comments (`claude: step N done,
 - COS-121 Milestone 1: branch popup + checkout, new branch, update, push (full architecture, contracts, steps, verification) — shipped 2026-09-09
 - COS-122 Milestone 2: full context menu, background push/pull jobs, live refresh, favourites — shipped 2026-09-09
 - COS-123 Milestone 3: own commit dialog (panel tab, staging, diff preview, commit as a job, amend, discard) — shipped 2026-09-09
-- COS-124 Milestone 4: own git log panel
+- COS-124 Milestone 4: own git log panel — shipped 2026-09-09
 - COS-125 Milestone 5: settings, read-only CLI and agent tool, release
 
-To resume: `bb status`, read this file, `linear issue view COS-124 --json`
-(and its comments; COS-121, COS-122 and COS-123 hold the architecture and
-the M2 / M3 designs), load the `bb-plugin-authoring` skill with the Skill
-tool, continue from the last completed step.
+To resume: `bb status`, read this file, `linear issue view COS-125 --json`
+(and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
+designs), load the `bb-plugin-authoring` skill with the Skill tool, continue
+from the last completed step.
 
 ## Architecture (three runtimes, one contract file)
 
@@ -47,21 +47,31 @@ app.tsx (browser) --useRpc(rpcContract, keyed by threadId)--> server.ts (bb serv
   first overview per repo registers a watch (`host/watch.ts`) that emits the
   `changed` signal. Reads for the panels live in `host/compare.ts`; the
   commit panel's reads and index mutations in `host/changes.ts` (commit is
-  a job too: hooks; the message goes on stdin through `runGit`'s `stdin`).
+  a job too: hooks; the message goes on stdin through `runGit`'s `stdin`);
+  the log panel's reads in `host/log.ts`, with cherry-pick, revert and reset
+  among the ordinary mutations in `host/actions.ts`. Patch caps, the binary
+  check and the both-sides read they share are in `host/diff-text.ts`.
 - `server.ts` resolves thread to environment, forwards to the host, then nudges
   `bb.sdk.environments.status` (0 s and 3.2 s) and publishes `changed`. It
   maps `hostId + repoRoot` to environment ids (from overviews) to route
   `jobEvent` (realtime `job`) and `changed` signals, and keeps favourites in
   kv (`fav:<hostId>:<repoRoot>`).
-- `app.tsx` registers `experimental_threadHeaderAction`, three
+- `app.tsx` registers `experimental_threadHeaderAction`, four
   `threadPanelAction` tabs (`compare`, `diff` in `views/panels.tsx`; `commit`
-  in `views/CommitPanel.tsx`, opened by the popup's Commit quick action and
-  its palette row without the popup) and `commandPaletteAction` rows; the popup is a portalled Popover + cmdk Command
-  with plugin-owned ranking (`shared/model.ts`, `menuFor` for the context
-  menu). Palette rows hand their request to the button through
+  in `views/CommitPanel.tsx`; `log` in `views/LogPanel.tsx`, the last two
+  opened by their popup quick action and by a palette row without the popup;
+  the ids live in `shared/panel-params.ts`) and `commandPaletteAction` rows;
+  the popup is a portalled Popover + cmdk Command
+  with plugin-owned ranking (`shared/model.ts`, `menuFor` for the branch
+  context menu, `commitMenuFor` for the log's). Palette rows hand their
+  request to the button through
   `lib/events.ts` module scope, never through an event `detail`. Jobs are
   awaited in `hooks/use-jobs.ts` (realtime `job` channel, `jobGet` polling
-  fallback); a confirmed action closes the popup and reports by toast.
+  fallback); a confirmed action closes the popup and reports by toast. The
+  log list is windowed by `shared/virtual.ts` (fixed row height, two
+  spacers), not by a dependency. `components/ui/context-menu.tsx` ignores
+  the pointerup that opened a menu: Radix clicks an item it saw no
+  pointerdown on, so a menu shifted over the pointer would run that row.
 - Pure, DOM-free logic in `shared/` with fixture tests. `shared/constants.ts`
   holds the values the app needs (pull strategies, realtime channel) so
   `contracts.ts` (zod) and `server/*` stay out of `dist/app.js`; a
@@ -79,8 +89,8 @@ bb plugin reload vcs-group   # after `bb plugin build` without `dev`
 ```
 
 Live click-through: `docs/VERIFY.md`, driven by `scripts/live-check.mjs`
-(M1), `scripts/live-check-m2.mjs` (M2) and `scripts/live-check-m3.mjs`
-(M3) on `scripts/live-lib.mjs` (system
+(M1), `scripts/live-check-m2.mjs` (M2), `scripts/live-check-m3.mjs` (M3)
+and `scripts/live-check-m4.mjs` (M4) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
 unique per run, the scratch repo is reused).
 
@@ -98,7 +108,8 @@ Styling is Tailwind against host theme tokens only.
 - Pre-flight before any mutation (index.lock, merge/rebase markers, detached
   HEAD, missing upstream) and typed error codes instead of thrown errors.
 - Confirm dialogs show the exact git command for push, delete, rebase, merge,
-  abort, worktree, detached checkout, force-with-lease, amend and discard.
+  abort, worktree, detached checkout, force-with-lease, amend, discard,
+  cherry-pick, revert and reset (`--hard` is destructive).
   Plain `--force` is not representable. The commit panel's checkbox is the
   staged state and Commit commits the index, never a path list; paths run
   under `--literal-pathspecs` after `--`; the message goes on stdin. A push always names remote and refspec (`PushPlan` in

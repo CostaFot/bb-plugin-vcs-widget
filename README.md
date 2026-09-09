@@ -1,15 +1,16 @@
 # VCS Group for bb
 
-IntelliJ's Git branches popup and commit dialog, inside bb. A branch button
-in every thread header opens a searchable popup with Favorites / Recent /
-Local / Remote branches, the full per-branch context menu, and background
-fetch, pull and push; a Commit panel tab stages, previews and commits, all
-running on the machine that owns the thread's worktree.
+IntelliJ's Git branches popup, commit dialog and log, inside bb. A branch
+button in every thread header opens a searchable popup with Favorites /
+Recent / Local / Remote branches, the full per-branch context menu, and
+background fetch, pull and push; a Commit panel tab stages, previews and
+commits, and a Git Log tab walks the history, all running on the machine
+that owns the thread's worktree.
 
-Status: milestone 3 shipped (the plugin's own commit dialog: staging
-checkboxes, diff preview with expand-context, commit as a background job,
-amend, sign-off, hooks, Commit and Push, per-file discard). `CLAUDE.md` has
-the architecture and the dev loop; the Linear project `bb-plugin-vcs-group`
+Status: milestone 4 shipped (the git log panel: virtualised rows with ref
+badges, branch and message filters, a details drawer with per-file diffs,
+and cherry-pick, revert and reset behind confirms). `CLAUDE.md` has the
+architecture and the dev loop; the Linear project `bb-plugin-vcs-group`
 tracks the milestones.
 
 ## Install for development
@@ -56,10 +57,22 @@ drive them.
   as a background job so hooks may take their time; their output streams
   into the panel and Cancel stops them. A per-file Discard always asks
   first with one command per category.
+- A "Git Log" panel tab (the popup's Show Git Log row, the palette row, or
+  Show Log on a branch): commits over all branches, the current branch or
+  one branch, with the refs each commit carries as badges, a literal
+  message filter, virtualised rows and Load more. Selecting a commit opens
+  the drawer below: its full sha, both identities and dates, the message and
+  the files it changed (against the first parent, or against nothing for the
+  first commit); selecting a file swaps the drawer for bb's diff viewer with
+  both complete sides. Right-click a commit for Checkout Revision, New
+  Branch from, Cherry-Pick, Revert Commit, Reset Current Branch to Here
+  (Soft / Mixed / Hard), Compare with the current branch and Copy Revision
+  Number.
 - Side panel tabs: "Compare branches" (commits only on either side, changed
   files, per-file patch) and "Diff with working tree", both rendered with
-  bb's diff viewer.
-- Seven command palette rows (`VCS Group: ...`) on thread routes.
+  bb's diff viewer. Compare also takes a revision, which is how the log
+  compares one commit with the current branch.
+- Eight command palette rows (`VCS Group: ...`) on thread routes.
 - Live refresh: bb's sidebar follows a plugin checkout within a few seconds,
   every open popup for the same repository refetches after an action or a
   job, and changes made by an agent or a terminal reach open popups through
@@ -110,6 +123,23 @@ in the meantime the host answers `head_changed` and pushes nothing. Plain
 | Delete (remote) | `git push --no-progress --delete --end-of-options <remote> refs/heads/<name>` |
 | New Worktree from | `git worktree add --end-of-options <repo>-<name> <name>` (remote: `--track -b <name> ... refs/remotes/<r>/<name>`) |
 | Checkout Tag or Revision | `git switch --detach --end-of-options <revision>` |
+| Show Log | reads only: `git log --topo-order --decorate=full ...` |
+
+## Every command the log panel runs
+
+| Row | Command |
+|---|---|
+| The list | `git log --topo-order --decorate=full --format=... -n 101 [--skip=<n>] [--grep=<text> --fixed-strings --regexp-ignore-case] (--branches --remotes \| HEAD \| <ref>) --` |
+| A commit | `git show --no-patch --decorate=full --format=... <sha> --`, then `git diff --numstat -z -M <parent> <sha> --` (first commit: `git diff-tree --root -r --numstat -z -M <sha> --`) |
+| A file in a commit | `git diff --no-color -M <parent> <sha> -- <path>` (first commit: `git show --format= <sha> -- <path>`), plus `git show <rev>:<path>` for the two sides |
+| Cherry-Pick | `git cherry-pick --end-of-options <sha>` |
+| Revert Commit | `git revert --no-edit --end-of-options <sha>` |
+| Reset Current Branch to Here | `git reset --soft\|--mixed\|--hard --end-of-options <sha> --` |
+
+The message filter is `--fixed-strings`, so the box is a literal substring
+search and never a regular expression the user did not write. Cherry-Pick
+and Revert are off for a merge commit: git needs a parent number there, and
+picking one is a dialog this plugin does not have.
 
 ## Every command the commit panel runs
 
@@ -147,11 +177,13 @@ means a path from `git status` can never turn into a glob or pathspec magic.
   cherry-pick or revert is in progress, or a job holds the repository; the
   popup tells you why and offers Abort or Cancel. One mutation at a time per
   repository; a second caller is told `busy`.
-- Push, merge, rebase, delete, worktree, detached checkout, amend and Update
-  Project on a dirty tree ask first and show the command. Forced deletes,
-  remote deletes and every discard are destructive confirms; force push is
-  only the leased form. A commit message never becomes an argument: it goes
-  to git's stdin.
+- Push, merge, rebase, delete, worktree, detached checkout, amend,
+  cherry-pick, revert, reset and Update Project on a dirty tree ask first and
+  show the command. Forced deletes, remote deletes, `reset --hard` and every
+  discard are destructive confirms; force push is only the leased form. A
+  commit message never becomes an argument: it goes to git's stdin.
+- The log's actions name the sha the row showed, never a branch name that
+  could have moved since, and the host resolves it before it runs anything.
 - Command palette requests travel inside the plugin bundle's module scope,
   not in a window event payload, and obey the same enabled/busy guards as a
   click on the row.
@@ -164,5 +196,5 @@ means a path from `git status` can never turn into a glob or pathspec magic.
 
 ## Roadmap
 
-Milestone 4 is a git log panel, milestone 5 settings UI, a read-only CLI and
-agent tool, and the release.
+Milestone 5 is the settings UI, a read-only CLI and agent tool, and the
+release.

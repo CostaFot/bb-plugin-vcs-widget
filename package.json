@@ -1,7 +1,7 @@
 {
   "name": "bb-plugin-vcs-group",
-  "version": "0.3.0",
-  "description": "IntelliJ-style Git branches popup and VCS actions for bb.",
+  "version": "0.4.0",
+  "description": "IntelliJ-style Git branches popup, commit dialog and log for bb.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,7 +16,7 @@
   },
   "bb": {
     "name": "VCS Group",
-    "description": "IntelliJ-style Git branches popup in the thread header and a commit dialog panel: search, favourites, checkout, new branch, the full per-branch context menu (rebase, merge, compare, diff, worktrees, rename, delete), staging, diff preview, commit, amend, background fetch, pull and push, running on the machine that owns the worktree.",
+    "description": "IntelliJ-style Git branches popup in the thread header, a commit dialog and a git log panel: search, favourites, checkout, new branch, the full per-branch context menu (rebase, merge, compare, diff, worktrees, rename, delete), staging, diff preview, commit, amend, history with cherry-pick, revert and reset, background fetch, pull and push, running on the machine that owns the worktree.",
     "branding": {
       "icon": "GitBranch"
     },

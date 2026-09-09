@@ -5,8 +5,8 @@ with a bare origin (including jobs, deadline, cancel and process-group kill,
 the file watch through the harness), the server against bb's fake plugin
 host, and the app under jsdom. This document is the click-through against a
 running bb: `scripts/live-check.mjs` for milestone 1, `scripts/live-check-m2.mjs`
-for milestone 2, `scripts/live-check-m3.mjs` for milestone 3, all on
-`scripts/live-lib.mjs`.
+for milestone 2, `scripts/live-check-m3.mjs` for milestone 3 and
+`scripts/live-check-m4.mjs` for milestone 4, all on `scripts/live-lib.mjs`.
 
 ## Setup
 
@@ -38,6 +38,8 @@ VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m2.mjs /tmp/vcs-scratch
 VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m3.mjs /tmp/vcs-scratch
+VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
+  node scripts/live-check-m4.mjs /tmp/vcs-scratch
 ```
 
 Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
@@ -160,14 +162,52 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
 13. Commit and Push commits, then the push dialog previews
     `git push --no-progress --end-of-options origin HEAD:refs/heads/main`;
     after Push the bare remote's `main` equals HEAD.
-14. The palette lists seven `VCS Group:` rows; "Commit..." opens the panel
+14. The palette lists eight `VCS Group:` rows; "Commit..." opens the panel
     without opening the popup.
+
+## Milestone 4 scenarios (`live-check-m4.mjs`)
+
+1. The popup's Actions group has "Show Git Log" (Alt+9 hint); clicking it
+   closes the popup and opens a "Git Log" panel tab.
+2. The list shows the history newest first, and the tip carries its refs as
+   badges: HEAD, the local branch, the remote-tracking branch.
+3. The branch filter changes which refs are walked: a commit on another
+   branch is in "All branches" and gone under "Current branch".
+4. The message filter finds the commit by its subject; adding a regex
+   character (`.`) finds nothing, because the filter is `--fixed-strings`.
+5. Selecting a commit shows its full sha, message and changed files;
+   selecting a file renders its diff in bb's viewer and Back returns to the
+   commit.
+6. The commit's context menu lists the seven rows; Cherry-Pick previews
+   `git cherry-pick --end-of-options <sha>` and, after confirming, HEAD
+   carries the picked subject.
+7. Revert Commit previews `git revert --no-edit --end-of-options <sha>`;
+   after confirming, HEAD is the revert and the file is gone again.
+8. Reset Current Branch to Here → Hard is a destructive confirm previewing
+   `git reset --hard --end-of-options <sha> --`; after confirming, the
+   branch is back at that commit.
+9. New Branch from a commit opens the branch form and creates the branch at
+   that sha, checked out.
+10. Compare with the current branch opens the compare tab with the commit as
+    the target revision.
+11. The palette row "VCS Group: Show Git Log" opens the panel without the
+    popup, and a commit made in a terminal appears in the open log without
+    a click.
+12. The palette lists eight `VCS Group:` rows.
 
 ## Last run
 
 2026-09-09, bb 0.42.1, git 2.55, one local machine: milestone 1 scenarios
-1 to 12 (27 steps), milestone 2 scenarios 1 to 19 (21 steps) and milestone
-3 scenarios 1 to 14 (16 steps) pass headlessly (see the COS-121, COS-122
-and COS-123 comments). Scenario 13 of milestone 1 waits for a remote
-machine (COS-126). The milestone 1 push step once failed to reopen the
-popup after a cancelled dialog and passed on the rerun (COS-127).
+1 to 12 (27 steps), milestone 2 scenarios 1 to 19 (21 steps), milestone 3
+scenarios 1 to 14 (16 steps) and milestone 4 scenarios 1 to 12 (12 steps)
+pass headlessly (see the COS-121 to COS-124 comments). Scenario 13 of
+milestone 1 waits for a remote machine (COS-126). The milestone 1 push step
+once failed to reopen the popup after a cancelled dialog and passed on the
+rerun (COS-127).
+
+Milestone 4 first ran with milestone 2 stopping at scenario 10: the log row
+made the branch context menu one row taller, so it no longer fitted below
+the pointer, an item ended up under it, and the release of the right-click
+that opened the menu ran that item (Radix clicks an item on a pointerup it
+saw no pointerdown for). `components/ui/context-menu.tsx` now ignores that
+release; the whole suite passes again.

@@ -5,8 +5,11 @@ import {
   parseForEachRef,
   parseGitVersion,
   parseLeftRightCount,
+  parseCommitDetails,
   parseLog,
+  parseLogPage,
   parseNumstat,
+  parseRefDecoration,
   parseRecentFromReflog,
   parseStatusEntries,
   parseStatusV2,
@@ -241,5 +244,89 @@ describe("parseLog / parseNumstat / parseTags", () => {
     ]);
     expect(parseLeftRightCount("3\t5\n")).toEqual({ left: 3, right: 5 });
     expect(parseLeftRightCount("")).toEqual({ left: 0, right: 0 });
+  });
+});
+
+describe("parseRefDecoration", () => {
+  it("tells heads, remotes and tags apart by their full names", () => {
+    expect(parseRefDecoration("HEAD -> refs/heads/main, tag: refs/tags/v1.0, refs/remotes/origin/main")).toEqual([
+      { kind: "head", name: "HEAD" },
+      { kind: "local", name: "main" },
+      { kind: "tag", name: "v1.0" },
+      { kind: "remote", name: "origin/main" },
+    ]);
+  });
+
+  it("handles a detached HEAD, a branch with a slash and unknown refs", () => {
+    expect(parseRefDecoration("HEAD")).toEqual([{ kind: "head", name: "HEAD" }]);
+    expect(parseRefDecoration("refs/heads/feature/x, refs/remotes/origin/feature/x")).toEqual([
+      { kind: "local", name: "feature/x" },
+      { kind: "remote", name: "origin/feature/x" },
+    ]);
+    expect(parseRefDecoration("refs/stash")).toEqual([{ kind: "other", name: "stash" }]);
+    expect(parseRefDecoration("")).toEqual([]);
+  });
+});
+
+describe("parseLogPage", () => {
+  it("parses rows with refs and parents", () => {
+    const raw = [
+      "aaa1\x00aaa\x00Costa\x001788945062\x00HEAD -> refs/heads/main\x00bbb2 ccc3\x00Merge branch 'x'",
+      "bbb2\x00bbb\x00Costa\x001788945061\x00\x00ccc3\x00first",
+      "",
+    ].join("\n");
+    expect(parseLogPage(raw)).toEqual([
+      {
+        sha: "aaa1",
+        shortSha: "aaa",
+        author: "Costa",
+        committedAt: 1788945062,
+        subject: "Merge branch 'x'",
+        refs: [
+          { kind: "head", name: "HEAD" },
+          { kind: "local", name: "main" },
+        ],
+        parents: ["bbb2", "ccc3"],
+      },
+      { sha: "bbb2", shortSha: "bbb", author: "Costa", committedAt: 1788945061, subject: "first", refs: [], parents: ["ccc3"] },
+    ]);
+    expect(parseLogPage("")).toEqual([]);
+  });
+});
+
+describe("parseCommitDetails", () => {
+  it("keeps a multi-line body and both identities", () => {
+    const raw = [
+      "aaa1",
+      "aaa",
+      "Costa",
+      "costa@example.com",
+      "1788945000",
+      "Committer",
+      "committer@example.com",
+      "1788945062",
+      "refs/heads/main",
+      "bbb2",
+      "Subject line\n\nA body paragraph.\n\n",
+    ].join("\0");
+    expect(parseCommitDetails(raw)).toEqual({
+      sha: "aaa1",
+      shortSha: "aaa",
+      author: "Costa",
+      authorEmail: "costa@example.com",
+      authoredAt: 1788945000,
+      committer: "Committer",
+      committerEmail: "committer@example.com",
+      committedAt: 1788945062,
+      subject: "Subject line",
+      message: "Subject line\n\nA body paragraph.",
+      refs: [{ kind: "local", name: "main" }],
+      parents: ["bbb2"],
+    });
+  });
+
+  it("returns null for a short record", () => {
+    expect(parseCommitDetails("")).toBeNull();
+    expect(parseCommitDetails("aaa\x00bbb")).toBeNull();
   });
 });

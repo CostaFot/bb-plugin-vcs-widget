@@ -211,7 +211,7 @@ try {
   const noToasts = (await H.toastText(page)) === "";
   step("M3-13 Commit and Push commits, then previews the tracked push and pushes HEAD; the panel raises no toast", cmd12 === "git push --no-progress --end-of-options origin HEAD:refs/heads/main" && /Pushed main/.test(toast12) && sh(`git --git-dir=${BARE} rev-parse main`) === head() && noToasts, `cmd="${cmd12}" status="${toast12.slice(-120)}" noToasts=${noToasts}`);
 
-  // M3-14 palette: seven rows, Commit... opens the panel directly
+  // M3-14 palette: the rows, Commit... opens the panel directly
   await page.keyboard.press("Escape");
   await sleep(300);
   await H.palette(page, "VCS Group");
@@ -220,7 +220,7 @@ try {
   await sleep(1500);
   const popupOpen = !!(await page.$('[data-testid="vcs-branch-popup"]'));
   const panelOpen = !!(await page.$(PANEL));
-  step("M3-14 seven palette rows; Commit... opens the panel without the popup", rows.length === 7 && rows.some((r) => /Commit\.\.\./.test(r)) && panelOpen && !popupOpen, JSON.stringify(rows));
+  step("M3-14 eight palette rows; Commit... opens the panel without the popup", rows.length === 8 && rows.some((r) => /Commit\.\.\./.test(r)) && panelOpen && !popupOpen, JSON.stringify(rows));
   await H.shot(page, "m3-14-end");
 } finally {
   await a.browser.close();

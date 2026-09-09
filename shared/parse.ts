@@ -383,3 +383,118 @@ export function parseLeftRightCount(raw: string): { left: number; right: number 
   const [left = "0", right = "0"] = raw.trim().split(/\s+/u);
   return { left: Number.parseInt(left, 10) || 0, right: Number.parseInt(right, 10) || 0 };
 }
+
+// ---------------------------------------------------------------------------
+// Log panel payloads
+// ---------------------------------------------------------------------------
+
+/** One log row: sha, short sha, author, commit time, decoration, parents, subject. */
+export const LOG_PAGE_FORMAT = "%H%x00%h%x00%an%x00%ct%x00%D%x00%P%x00%s";
+
+/** One commit in full: the fields above plus both identities, the author date and the body. */
+export const COMMIT_DETAILS_FORMAT =
+  "%H%x00%h%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%D%x00%P%x00%B";
+
+export type RefBadgeKind = "head" | "local" | "remote" | "tag" | "other";
+
+export interface RefBadge {
+  kind: RefBadgeKind;
+  name: string;
+}
+
+const TAG_PREFIX = "refs/tags/";
+
+/**
+ * Parses `%D` as printed with `--decorate=full`, where every ref carries its
+ * full name: "HEAD -> refs/heads/main, tag: refs/tags/v1,
+ * refs/remotes/origin/main". Full names are why the app never has to guess
+ * whether "origin/main" is a remote-tracking branch or a local one with a
+ * slash in its name.
+ */
+export function parseRefDecoration(raw: string): RefBadge[] {
+  const badges: RefBadge[] = [];
+  for (const part of raw.split(", ")) {
+    const token = part.trim();
+    if (token.length === 0) continue;
+    const [head, pointee] = token.split(" -> ");
+    if (pointee !== undefined) {
+      badges.push({ kind: "head", name: head ?? "HEAD" }, ...parseRefDecoration(pointee));
+      continue;
+    }
+    if (token === "HEAD") {
+      badges.push({ kind: "head", name: "HEAD" });
+    } else if (token.startsWith("tag: ")) {
+      const name = token.slice("tag: ".length);
+      badges.push({ kind: "tag", name: name.startsWith(TAG_PREFIX) ? name.slice(TAG_PREFIX.length) : name });
+    } else if (token.startsWith(HEADS_PREFIX)) {
+      badges.push({ kind: "local", name: token.slice(HEADS_PREFIX.length) });
+    } else if (token.startsWith(REMOTES_PREFIX)) {
+      badges.push({ kind: "remote", name: token.slice(REMOTES_PREFIX.length) });
+    } else if (token.startsWith(TAG_PREFIX)) {
+      badges.push({ kind: "tag", name: token.slice(TAG_PREFIX.length) });
+    } else {
+      badges.push({ kind: "other", name: token.startsWith("refs/") ? token.slice("refs/".length) : token });
+    }
+  }
+  return badges;
+}
+
+const splitParents = (raw: string): string[] => raw.split(" ").filter((sha) => sha.length > 0);
+
+export interface ParsedLogCommit extends ParsedCommit {
+  refs: RefBadge[];
+  parents: string[];
+}
+
+/** Parses `git log --format=<LOG_PAGE_FORMAT>`: one record per line. */
+export function parseLogPage(raw: string): ParsedLogCommit[] {
+  const commits: ParsedLogCommit[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.length === 0) continue;
+    const [sha, shortSha, author, committedAt, decoration, parents, ...subject] = line.split("\0");
+    if (!sha || !shortSha) continue;
+    commits.push({
+      sha,
+      shortSha,
+      author: author ?? "",
+      committedAt: Number.parseInt(committedAt ?? "0", 10) || 0,
+      subject: subject.join("\0"),
+      refs: parseRefDecoration(decoration ?? ""),
+      parents: splitParents(parents ?? ""),
+    });
+  }
+  return commits;
+}
+
+export interface ParsedCommitDetails extends ParsedLogCommit {
+  authorEmail: string;
+  authoredAt: number;
+  committer: string;
+  committerEmail: string;
+  /** The full message, trailing newlines stripped. */
+  message: string;
+}
+
+/** Parses one `git show --no-patch --format=<COMMIT_DETAILS_FORMAT>` record. */
+export function parseCommitDetails(raw: string): ParsedCommitDetails | null {
+  const fields = raw.split("\0");
+  if (fields.length < 11) return null;
+  const [sha, shortSha, author, authorEmail, authoredAt, committer, committerEmail, committedAt, decoration, parents, ...rest] =
+    fields as [string, string, string, string, string, string, string, string, string, string, ...string[]];
+  if (sha === "" || shortSha === "") return null;
+  const message = rest.join("\0").replace(/\n+$/u, "");
+  return {
+    sha,
+    shortSha,
+    author,
+    authorEmail,
+    authoredAt: Number.parseInt(authoredAt, 10) || 0,
+    committer,
+    committerEmail,
+    committedAt: Number.parseInt(committedAt, 10) || 0,
+    subject: message.split("\n")[0] ?? "",
+    message,
+    refs: parseRefDecoration(decoration),
+    parents: splitParents(parents),
+  };
+}

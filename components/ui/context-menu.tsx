@@ -78,6 +78,59 @@ type ContextMenuShortcutProps = React.HTMLAttributes<HTMLSpanElement>;
 
 const CONTEXT_MENU_LAYER_CLASS = "z-[70]";
 
+/**
+ * A right-click opens the menu under the pointer, and Radix's items click
+ * themselves on a pointerup they never saw a pointerdown for (the
+ * press-drag-release gesture). When the menu cannot open below the pointer
+ * it is shifted, an item ends up under it, and releasing the button that
+ * opened the menu runs that item. Nothing in this menu should run without
+ * being chosen, so the release that opened the menu is ignored: until the
+ * pointer has moved, or for a moment after opening, an item selects on a
+ * real click only.
+ */
+const OPENING_RELEASE_GRACE_MS = 300;
+
+interface OpeningRelease {
+  /** True while a pointerup would be the release of the click that opened the menu. */
+  isOpeningRelease: () => boolean;
+  onPointerMove: () => void;
+}
+
+const OpeningReleaseContext = React.createContext<OpeningRelease>({
+  isOpeningRelease: () => false,
+  onPointerMove: () => undefined,
+});
+
+function useOpeningRelease(): OpeningRelease {
+  const openedAt = React.useRef(0);
+  const moved = React.useRef(false);
+  React.useEffect(() => {
+    openedAt.current = performance.now();
+    moved.current = false;
+  }, []);
+  return React.useMemo(
+    () => ({
+      isOpeningRelease: () => !moved.current || performance.now() - openedAt.current < OPENING_RELEASE_GRACE_MS,
+      onPointerMove: () => {
+        moved.current = true;
+      },
+    }),
+    [],
+  );
+}
+
+/** Blocks Radix's synthesised click for the pointerup that opened the menu. */
+function useOpeningReleaseGuard(callerPointerUp?: React.PointerEventHandler<HTMLElement>) {
+  const { isOpeningRelease } = React.useContext(OpeningReleaseContext);
+  return React.useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      callerPointerUp?.(event);
+      if (isOpeningRelease()) event.preventDefault();
+    },
+    [callerPointerUp, isOpeningRelease],
+  );
+}
+
 const ContextMenu = ContextMenuPrimitive.Root;
 const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 const ContextMenuGroup = ContextMenuPrimitive.Group;
@@ -146,22 +199,31 @@ ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName;
 const ContextMenuContent = React.forwardRef<
   ContextMenuContentElement,
   ContextMenuContentProps
->(({ className, children, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
-    <ContextMenuPrimitive.Content
-      ref={ref}
-      {...usePortalScopeProps()}
-      className={cn(
-        CONTEXT_MENU_LAYER_CLASS,
-        "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className,
-      )}
-      {...props}
-    >
-      <MenuHoverProvider>{children}</MenuHoverProvider>
-    </ContextMenuPrimitive.Content>
-  </ContextMenuPrimitive.Portal>
-));
+>(({ className, children, onPointerMove, ...props }, ref) => {
+  const opening = useOpeningRelease();
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Content
+        ref={ref}
+        {...usePortalScopeProps()}
+        className={cn(
+          CONTEXT_MENU_LAYER_CLASS,
+          "min-w-28 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          className,
+        )}
+        onPointerMove={(event) => {
+          onPointerMove?.(event);
+          opening.onPointerMove();
+        }}
+        {...props}
+      >
+        <OpeningReleaseContext.Provider value={opening}>
+          <MenuHoverProvider>{children}</MenuHoverProvider>
+        </OpeningReleaseContext.Provider>
+      </ContextMenuPrimitive.Content>
+    </ContextMenuPrimitive.Portal>
+  );
+});
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName;
 
 const ContextMenuItem = React.forwardRef<
@@ -174,6 +236,7 @@ const ContextMenuItem = React.forwardRef<
       inset,
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
+      onPointerUp: callerPointerUp,
       ...props
     },
     ref,
@@ -182,10 +245,12 @@ const ContextMenuItem = React.forwardRef<
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
     });
+    const onPointerUp = useOpeningReleaseGuard(callerPointerUp);
 
     return (
       <ContextMenuPrimitive.Item
         ref={ref}
+        onPointerUp={onPointerUp}
         className={cn(
           "relative flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-[0.3125rem] text-xs outline-none focus:bg-state-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
           LIST_HOVER_TRANSITION,
@@ -212,6 +277,7 @@ const ContextMenuCheckboxItem = React.forwardRef<
       checked,
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
+      onPointerUp: callerPointerUp,
       ...props
     },
     ref,
@@ -220,10 +286,12 @@ const ContextMenuCheckboxItem = React.forwardRef<
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
     });
+    const onPointerUp = useOpeningReleaseGuard(callerPointerUp);
 
     return (
       <ContextMenuPrimitive.CheckboxItem
         ref={ref}
+        onPointerUp={onPointerUp}
         className={cn(
           "relative flex cursor-default select-none items-center rounded-sm py-[0.3125rem] pl-2 pr-8 text-xs outline-none focus:bg-state-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
           LIST_HOVER_TRANSITION,
@@ -262,6 +330,7 @@ const ContextMenuRadioItem = React.forwardRef<
       children,
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
+      onPointerUp: callerPointerUp,
       ...props
     },
     ref,
@@ -270,10 +339,12 @@ const ContextMenuRadioItem = React.forwardRef<
       onPointerEnter: callerPointerEnter,
       onKeyDown: callerKeyDown,
     });
+    const onPointerUp = useOpeningReleaseGuard(callerPointerUp);
 
     return (
       <ContextMenuPrimitive.RadioItem
         ref={ref}
+        onPointerUp={onPointerUp}
         className={cn(
           "relative flex cursor-default select-none items-center rounded-sm py-[0.3125rem] pl-8 pr-2 text-xs outline-none focus:bg-state-hover focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
           LIST_HOVER_TRANSITION,

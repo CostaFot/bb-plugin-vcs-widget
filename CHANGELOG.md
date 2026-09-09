@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.0 (2026-09-09) — milestone 4
+
+The plugin's own git log, as a thread panel tab.
+
+- "Git Log" panel tab, opened from the popup's new "Show Git Log" quick
+  action, the palette row "VCS Group: Show Git Log" (which opens it without
+  the popup), or "Show Log" on a branch's context menu (which preselects
+  that branch). A list, not a graph: `git log --topo-order` so children
+  always come before parents whatever the clock says.
+- Rows are virtualised by hand (fixed height, two spacers, `shared/virtual.ts`),
+  so a long history renders a screenful of nodes. Each row carries the refs
+  that point at it as badges, read from `%D` with `--decorate=full` so
+  branches, remote-tracking branches and tags are told apart rather than
+  guessed at.
+- Filters: all branches, the current branch, or one branch; plus a message
+  filter that runs as `--grep=<text> --fixed-strings --regexp-ignore-case`,
+  so the box is a literal substring search and never a regular expression
+  the user did not write. "Load more" reads the next page with `--skip` and
+  dedupes by sha.
+- Selecting a commit opens the drawer: full sha, author and committer with
+  their dates, the message, and the files the commit changed against its
+  first parent (against nothing for the first commit). Selecting a file
+  swaps the drawer for bb's diff viewer with both complete sides, so
+  expand-context works.
+- Per-commit context menu: Checkout Revision, New Branch from (the popup's
+  form, with the commit as the start point), Cherry-Pick, Revert Commit,
+  Reset Current Branch to Here (Soft / Mixed / Hard), Compare with the
+  current branch, Copy Revision Number. Cherry-Pick and Revert are off for a
+  merge commit, which git can only apply with a parent number.
+- Cherry-pick, revert and reset ask first with the exact command and name
+  the sha the row showed; `reset --hard` is a destructive confirm. A
+  conflict leaves the cherry-pick or revert in progress, which the popup's
+  existing Abort concludes.
+- Compare now takes a revision as well as a branch, which is how the log
+  compares one commit with the current branch.
+- Fixed: a right-click could run the menu item that ended up under the
+  pointer. Radix clicks an item on a pointerup it saw no pointerdown for
+  (the press-drag-release gesture), so when a context menu did not fit below
+  the pointer and was shifted over it, releasing the button that opened the
+  menu ran that item — Checkout, on a branch row. `ContextMenuItem` now
+  ignores that release.
+- Internals: `host/log.ts` for the reads, the three mutations in
+  `host/actions.ts` with the usual pre-flight, and `host/diff-text.ts` for
+  the patch caps, the binary check and the both-sides read that the compare,
+  commit and log panels had each copied.
+
 ## 0.3.0 (2026-09-09) — milestone 3
 
 The plugin's own commit dialog, as a thread panel tab.

@@ -105,6 +105,17 @@ function defaultHostResult(call: HostCall): unknown {
   if (call.method === "listTags") return { ok: true, tags: [], truncated: false };
   if (call.method === "changes") return { ok: true, head: { kind: "branch", name: "main", sha: "abc1234" }, operation: "none", indexLocked: false, files: [{ path: "a.txt", oldPath: null, index: ".", worktree: "M", kind: "tracked" }], truncated: false, lastCommit: null };
   if (call.method === "diffFile") return { ok: true, path: "a.txt", side: "worktree", patch: "", truncated: false, binary: false, contents: null };
+  if (call.method === "log") return { ok: true, commits: [{ sha: "abc1234def", shortSha: "abc1234", author: "Costa", committedAt: 1, subject: "a change", refs: [], parents: [] }], skip: 0, hasMore: false };
+  if (call.method === "commitDetails") {
+    return {
+      ok: true,
+      commit: { sha: "abc1234def", shortSha: "abc1234", author: "Costa", authorEmail: "c@example.com", authoredAt: 1, committer: "Costa", committerEmail: "c@example.com", committedAt: 1, subject: "a change", message: "a change", refs: [], parents: [] },
+      files: [],
+      truncated: false,
+      againstParent: null,
+    };
+  }
+  if (call.method === "commitPatch") return { ok: true, path: "a.txt", patch: "", truncated: false, binary: false, contents: null };
   if (call.method === "compare") return { ok: true, base: "main", target: "feature", aheadCount: 0, behindCount: 0, ahead: [], behind: [], files: [], truncated: { ahead: false, behind: false, files: false } };
   const result: ActionResult = { ok: true, message: `${call.method} done`, overview: overview() };
   return result;
@@ -363,6 +374,33 @@ describe("server", () => {
     expect(hostCalls[5]?.input).toEqual({ repoPath: "/repo", message: "Subject\n\nBody", amend: false, signoff: true, noVerify: false, timeoutMs: 120_000 });
     await expect(harness.behavior.callRpc("commit", { threadId: "t1", message: "   ", amend: false, signoff: false, noVerify: false })).rejects.toThrow();
     await expect(harness.behavior.callRpc("stage", { threadId: "t1", paths: ["/etc/passwd"] })).rejects.toThrow();
+  });
+
+  it("forwards the log panel: reads, and its mutations with a change publish", async () => {
+    const { bb, harness, hostCalls } = setup();
+    await plugin(bb);
+    const page = await harness.behavior.callRpc("log", { threadId: "t1", filter: { kind: "all" }, grep: null, skip: 0 });
+    expect(page).toMatchObject({ ok: true, hasMore: false });
+    await harness.behavior.callRpc("commitDetails", { threadId: "t1", sha: "abc1234def" });
+    await harness.behavior.callRpc("commitPatch", { threadId: "t1", sha: "abc1234def", path: "a.txt", oldPath: null });
+    const picked = (await harness.behavior.callRpc("cherryPick", { threadId: "t1", sha: "abc1234def" })) as ActionResult;
+    expect(picked.ok).toBe(true);
+    expect(harness.realtimeSignals).toContainEqual({ channel: "changed", payload: { environmentId: "env1", reason: "cherryPick" } });
+    await harness.behavior.callRpc("revert", { threadId: "t1", sha: "abc1234def" });
+    await harness.behavior.callRpc("resetTo", { threadId: "t1", sha: "abc1234def", mode: "hard" });
+    expect(hostCalls.map((call) => [call.method, call.input])).toEqual([
+      ["log", { repoPath: "/repo", filter: { kind: "all" }, grep: null, skip: 0 }],
+      ["commitDetails", { repoPath: "/repo", sha: "abc1234def" }],
+      ["commitPatch", { repoPath: "/repo", sha: "abc1234def", path: "a.txt", oldPath: null }],
+      ["cherryPick", { repoPath: "/repo", sha: "abc1234def" }],
+      ["revert", { repoPath: "/repo", sha: "abc1234def" }],
+      ["resetTo", { repoPath: "/repo", sha: "abc1234def", mode: "hard" }],
+    ]);
+    // The boundary refuses what git would have to interpret.
+    await expect(harness.behavior.callRpc("cherryPick", { threadId: "t1", sha: "HEAD~1" })).rejects.toThrow();
+    await expect(harness.behavior.callRpc("resetTo", { threadId: "t1", sha: "abc1234def", mode: "keep" })).rejects.toThrow();
+    await expect(harness.behavior.callRpc("log", { threadId: "t1", filter: { kind: "ref", ref: { kind: "local", name: "-x" } }, grep: null, skip: 0 })).rejects.toThrow();
+    await expect(harness.behavior.callRpc("log", { threadId: "t1", filter: { kind: "all" }, grep: "a\u0000b", skip: 0 })).rejects.toThrow();
   });
 
   it("keeps favourites per host and repository in kv and tells other panes", async () => {

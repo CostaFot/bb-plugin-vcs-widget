@@ -20,6 +20,9 @@ export type GitPhase =
   | "setUpstream"
   | "worktree"
   | "checkoutRevision"
+  | "cherryPick"
+  | "revert"
+  | "reset"
   | "compare"
   | "stage"
   | "discard"
@@ -138,6 +141,9 @@ const PHASE_VERB: Record<GitPhase, string> = {
   setUpstream: "Tracked Branch",
   worktree: "New Worktree",
   checkoutRevision: "Checkout",
+  cherryPick: "Cherry-Pick",
+  revert: "Revert",
+  reset: "Reset",
   compare: "Compare",
   stage: "Staging",
   discard: "Discard",

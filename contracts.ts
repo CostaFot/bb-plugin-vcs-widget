@@ -12,10 +12,13 @@ import { z } from "zod";
 import {
   DIFF_SIDES,
   JOB_KINDS,
+  LOG_MAX_SKIP,
   MAX_COMMIT_MESSAGE_BYTES,
+  MAX_LOG_GREP_LENGTH,
   MAX_PATHS_PER_CALL,
   MAX_PATH_BYTES_PER_CALL,
   PULL_STRATEGIES,
+  RESET_MODES,
 } from "./shared/constants";
 import {
   MAX_BRANCH_NAME_LENGTH,
@@ -53,6 +56,23 @@ export const repoFilePathSchema = z
   .refine((path) => !path.startsWith("/") && !path.split("/").includes("..") && !path.includes("\0"), {
     message: "Invalid repository path",
   });
+
+/** A branch as the popup lists it: local by name, or remote by remote and branch. */
+const localRefSchema = z.object({ kind: z.literal("local"), name: branchNameSchema }).strict();
+const remoteRefSchema = z
+  .object({ kind: z.literal("remote"), remote: remoteNameSchema, branch: branchNameSchema })
+  .strict();
+const revisionRefSchema = z.object({ kind: z.literal("revision"), revision: refishSchema }).strict();
+
+export const branchRefSchema = z.discriminatedUnion("kind", [localRefSchema, remoteRefSchema]);
+export const checkoutTargetSchema = branchRefSchema;
+
+/**
+ * What the compare panel can be pointed at: a branch from the popup, or a
+ * revision from the log. The host resolves either to a commit before it
+ * diffs, so a tag and a branch of the same name cannot be confused.
+ */
+export const compareRefSchema = z.discriminatedUnion("kind", [localRefSchema, remoteRefSchema, revisionRefSchema]);
 
 // ---------------------------------------------------------------------------
 // Overview: everything the popup renders, produced by the host.
@@ -277,8 +297,23 @@ export const compareResultSchema = z.union([
   failure,
 ]);
 
+const fileContentSchema = z.object({ path: z.string(), content: z.string() }).strict();
+
+/** Both complete sides of a file, when textual and small enough for the viewer to expand context. */
+const diffContentsSchema = z.object({ old: fileContentSchema, new: fileContentSchema }).strict().nullable();
+
 export const patchResultSchema = z.union([
-  z.object({ ok: z.literal(true), path: z.string(), patch: z.string(), truncated: z.boolean(), binary: z.boolean() }).strict(),
+  z
+    .object({
+      ok: z.literal(true),
+      path: z.string(),
+      patch: z.string(),
+      truncated: z.boolean(),
+      binary: z.boolean(),
+      /** Only the log's commit patch fills this in; the branch panels send null. */
+      contents: diffContentsSchema,
+    })
+    .strict(),
   failure,
 ]);
 
@@ -329,8 +364,6 @@ export const changesResultSchema = z.union([
 
 export const diffSideSchema = z.enum(DIFF_SIDES);
 
-const fileContentSchema = z.object({ path: z.string(), content: z.string() }).strict();
-
 export const fileDiffSchema = z.union([
   z
     .object({
@@ -344,11 +377,77 @@ export const fileDiffSchema = z.union([
        * Both complete sides, when textual and small enough; the diff viewer
        * can then expand context between hunks. Null otherwise.
        */
-      contents: z.object({ old: fileContentSchema, new: fileContentSchema }).strict().nullable(),
+      contents: diffContentsSchema,
     })
     .strict(),
   failure,
 ]);
+
+// ---------------------------------------------------------------------------
+// Log panel
+// ---------------------------------------------------------------------------
+
+/** One decoration on a log row, from `%D` with `--decorate=full`. */
+export const refBadgeSchema = z
+  .object({ kind: z.enum(["head", "local", "remote", "tag", "other"]), name: z.string() })
+  .strict();
+
+export const logCommitSchema = commitSchema
+  .extend({ refs: z.array(refBadgeSchema), parents: z.array(z.string()) })
+  .strict();
+
+/** Which refs the log walks: every branch, the current HEAD, or one branch. */
+export const logFilterSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("all") }).strict(),
+  z.object({ kind: z.literal("head") }).strict(),
+  z.object({ kind: z.literal("ref"), ref: branchRefSchema }).strict(),
+]);
+
+/** A literal substring of the message, never a regex: the host passes `--fixed-strings`. */
+export const logGrepSchema = z
+  .string()
+  .min(1)
+  .max(MAX_LOG_GREP_LENGTH)
+  .refine((text) => !text.includes("\0") && !text.includes("\n"), { message: "Invalid filter" });
+
+export const logPageSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      commits: z.array(logCommitSchema),
+      /** Commits skipped before this page. */
+      skip: count,
+      hasMore: z.boolean(),
+    })
+    .strict(),
+  failure,
+]);
+
+export const commitDetailsSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      commit: logCommitSchema
+        .extend({
+          authorEmail: z.string(),
+          authoredAt: count,
+          committer: z.string(),
+          committerEmail: z.string(),
+          /** The full message, trailing newlines stripped. */
+          message: z.string(),
+        })
+        .strict(),
+      /** Changed against the first parent; against the empty tree for the initial commit. */
+      files: z.array(fileChangeSchema),
+      truncated: z.boolean(),
+      /** The parent the file list and the patches are diffed against; null for the initial commit. */
+      againstParent: z.string().nullable(),
+    })
+    .strict(),
+  failure,
+]);
+
+export const resetModeSchema = z.enum(RESET_MODES);
 
 export const tagSchema = z
   .object({ name: z.string(), sha: z.string(), createdAt: count, subject: z.string() })
@@ -362,15 +461,6 @@ export const tagListSchema = z.union([
 // ---------------------------------------------------------------------------
 // Action inputs
 // ---------------------------------------------------------------------------
-
-/** A branch as the popup lists it: local by name, or remote by remote and branch. */
-export const branchRefSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("local"), name: branchNameSchema }).strict(),
-  z
-    .object({ kind: z.literal("remote"), remote: remoteNameSchema, branch: branchNameSchema })
-    .strict(),
-]);
-export const checkoutTargetSchema = branchRefSchema;
 
 export { PULL_STRATEGIES };
 export const pullStrategySchema = z.enum(PULL_STRATEGIES);
@@ -412,8 +502,18 @@ const setUpstreamFields = {
 };
 const addWorktreeFields = { ref: branchRefSchema, path: z.string().min(1).max(4096) };
 const checkoutRevisionFields = { revision: refishSchema };
-const compareFields = { base: branchRefSchema, target: branchRefSchema };
+const compareFields = { base: compareRefSchema, target: compareRefSchema };
 const comparePatchFields = { ...compareFields, path: repoFilePathSchema };
+const logFields = {
+  filter: logFilterSchema,
+  /** null = no message filter. */
+  grep: logGrepSchema.nullable(),
+  skip: z.number().int().min(0).max(LOG_MAX_SKIP),
+};
+const commitShaFields = { sha: shaSchema };
+/** `oldPath` joins the pathspec so a rename's patch shows the rename, as in the commit panel. */
+const commitPatchFields = { ...commitShaFields, path: repoFilePathSchema, oldPath: repoFilePathSchema.nullable() };
+const resetFields = { ...commitShaFields, mode: resetModeSchema };
 const diffWorkingTreeFields = { ref: branchRefSchema };
 const diffWorkingTreePatchFields = { ...diffWorkingTreeFields, path: repoFilePathSchema };
 const updateBranchFields = { branch: branchNameSchema };
@@ -561,6 +661,30 @@ export const rpcContract = defineRpcContract({
     input: threadInput.extend(diffWorkingTreePatchFields).strict(),
     output: patchResultSchema,
   },
+  log: {
+    input: threadInput.extend(logFields).strict(),
+    output: logPageSchema,
+  },
+  commitDetails: {
+    input: threadInput.extend(commitShaFields).strict(),
+    output: commitDetailsSchema,
+  },
+  commitPatch: {
+    input: threadInput.extend(commitPatchFields).strict(),
+    output: patchResultSchema,
+  },
+  cherryPick: {
+    input: threadInput.extend(commitShaFields).strict(),
+    output: actionResultSchema,
+  },
+  revert: {
+    input: threadInput.extend(commitShaFields).strict(),
+    output: actionResultSchema,
+  },
+  resetTo: {
+    input: threadInput.extend(resetFields).strict(),
+    output: actionResultSchema,
+  },
   favourites: {
     input: threadInput.strict(),
     output: favouriteNames,
@@ -700,6 +824,30 @@ export const hostContract = defineRpcContract({
     input: repoInput.extend(diffWorkingTreePatchFields).strict(),
     output: patchResultSchema,
   },
+  log: {
+    input: repoInput.extend(logFields).strict(),
+    output: logPageSchema,
+  },
+  commitDetails: {
+    input: repoInput.extend(commitShaFields).strict(),
+    output: commitDetailsSchema,
+  },
+  commitPatch: {
+    input: repoInput.extend(commitPatchFields).strict(),
+    output: patchResultSchema,
+  },
+  cherryPick: {
+    input: repoInput.extend(commitShaFields).strict(),
+    output: actionResultSchema,
+  },
+  revert: {
+    input: repoInput.extend(commitShaFields).strict(),
+    output: actionResultSchema,
+  },
+  resetTo: {
+    input: repoInput.extend(resetFields).strict(),
+    output: actionResultSchema,
+  },
   changes: {
     input: repoInput.strict(),
     output: changesResultSchema,
@@ -750,6 +898,13 @@ export type Commit = z.infer<typeof commitSchema>;
 export type FileChange = z.infer<typeof fileChangeSchema>;
 export type CompareResult = z.infer<typeof compareResultSchema>;
 export type PatchResult = z.infer<typeof patchResultSchema>;
+export type CompareRef = z.infer<typeof compareRefSchema>;
+export type RefBadge = z.infer<typeof refBadgeSchema>;
+export type LogCommit = z.infer<typeof logCommitSchema>;
+export type LogFilter = z.infer<typeof logFilterSchema>;
+export type LogPage = z.infer<typeof logPageSchema>;
+export type CommitDetails = z.infer<typeof commitDetailsSchema>;
+export type ResetMode = z.infer<typeof resetModeSchema>;
 export type WorkingTreeDiff = z.infer<typeof workingTreeDiffSchema>;
 export type Tag = z.infer<typeof tagSchema>;
 export type TagList = z.infer<typeof tagListSchema>;

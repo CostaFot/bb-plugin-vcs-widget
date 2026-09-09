@@ -1,12 +1,14 @@
 // VCS Group frontend: a branch button in every thread header that opens the
 // Git branches popup, command palette rows that open it or run one of its
-// quick actions, and three side-panel tabs: compare branches and diff with
-// the working tree (from the context menu) and the commit dialog.
+// quick actions, and four side-panel tabs: compare branches and diff with
+// the working tree (from the context menu), the commit dialog and the log.
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { requestOpen } from "./lib/events";
 import type { QuickActionId } from "./shared/model";
-import { BranchButton, PANEL_ACTION } from "./views/BranchButton";
+import { PANEL_ACTION } from "./shared/panel-params";
+import { BranchButton } from "./views/BranchButton";
 import { CommitPanel } from "./views/CommitPanel";
+import { LogPanel } from "./views/LogPanel";
 import { ComparePanel, DiffPanel } from "./views/panels";
 import "./app.css";
 
@@ -14,6 +16,7 @@ const PALETTE_ROWS: { id: string; title: string; action: QuickActionId | null }[
   { id: "open-branches", title: "VCS Group: Open branches", action: null },
   { id: "update-project", title: "VCS Group: Update Project", action: "update" },
   { id: "commit", title: "VCS Group: Commit...", action: "commit" },
+  { id: "log", title: "VCS Group: Show Git Log", action: "log" },
   { id: "fetch", title: "VCS Group: Fetch", action: "fetch" },
   { id: "push", title: "VCS Group: Push...", action: "push" },
   { id: "new-branch", title: "VCS Group: New Branch...", action: "new-branch" },
@@ -48,6 +51,14 @@ export default definePluginApp((app) => {
     title: "Commit",
     icon: "Check",
     component: CommitPanel,
+    layout: "flush",
+  });
+
+  app.slots.threadPanelAction({
+    id: PANEL_ACTION.log,
+    title: "Git Log",
+    icon: "Clock",
+    component: LogPanel,
     layout: "flush",
   });
 

@@ -15,6 +15,7 @@ import {
   addWorktree,
   checkout,
   checkoutRevision,
+  cherryPick,
   createBranch,
   deleteBranch,
   merge,
@@ -27,6 +28,8 @@ import {
   prepareUpdateBranch,
   rebase,
   renameBranch,
+  resetTo,
+  revert,
   setUpstream,
   type ActionContext,
   type PreparedJob,
@@ -36,6 +39,7 @@ import { diffFile, discard, prepareCommit, readChanges, stage, unstage } from ".
 import { compare, comparePatch, diffWorkingTree, diffWorkingTreePatch, listTags } from "./host/compare";
 import { GitSpawnError } from "./host/git";
 import { cancelJob, disposeJobs, jobState, startJob } from "./host/jobs";
+import { commitDetails, commitPatch, readLog } from "./host/log";
 import { BUSY, tryAcquireRepoLock, tryWithRepoLock } from "./host/locks";
 import { OverviewReadError, readOverview, resolveRepo, type RepoInfo } from "./host/repo";
 import { disposeWatches, ensureWatch } from "./host/watch";
@@ -246,6 +250,24 @@ export default experimental_defineHostEntry({
     },
     diffWorkingTreePatch({ repoPath, ...input }, context) {
       return withRepoRead(repoPath, context, (action) => diffWorkingTreePatch(action, input), (error) => ({ ok: false, error }));
+    },
+    log({ repoPath, ...input }, context) {
+      return withRepoRead(repoPath, context, (action) => readLog(action, input), (error) => ({ ok: false, error }));
+    },
+    commitDetails({ repoPath, sha }, context) {
+      return withRepoRead(repoPath, context, (action) => commitDetails(action, { sha }), (error) => ({ ok: false, error }));
+    },
+    commitPatch({ repoPath, ...input }, context) {
+      return withRepoRead(repoPath, context, (action) => commitPatch(action, input), (error) => ({ ok: false, error }));
+    },
+    cherryPick({ repoPath, sha }, context) {
+      return withRepo(repoPath, context, (action) => cherryPick(action, { sha }));
+    },
+    revert({ repoPath, sha }, context) {
+      return withRepo(repoPath, context, (action) => revert(action, { sha }));
+    },
+    resetTo({ repoPath, ...input }, context) {
+      return withRepo(repoPath, context, (action) => resetTo(action, input));
     },
     changes({ repoPath }, context) {
       return withRepoRead(repoPath, context, (action) => readChanges(action), (error) => ({ ok: false, error }));

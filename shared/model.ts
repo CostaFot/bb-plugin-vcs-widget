@@ -2,7 +2,19 @@
 // the exact git argv each action runs. The host builds its argv through
 // `gitArgvFor`, and the confirm dialog previews the same argv, so the two can
 // never drift.
-import type { BranchRef, ChangeEntry, ChangesResult, LocalBranch, Operation, Overview, PullStrategy, RemoteBranch } from "../contracts";
+import type {
+  BranchRef,
+  ChangeEntry,
+  ChangesResult,
+  CompareRef,
+  LocalBranch,
+  LogCommit,
+  Operation,
+  Overview,
+  PullStrategy,
+  RemoteBranch,
+  ResetMode,
+} from "../contracts";
 import { isValidRemoteName } from "./branch-name";
 import { MIN_GIT_VERSION } from "./constants";
 import { gitVersionAtLeast, splitRemoteRef } from "./parse";
@@ -48,6 +60,11 @@ export type GitPlan =
   | { op: "clean"; paths: readonly string[] }
   /** The message goes on stdin (`-F -`); it is never an argument. */
   | { op: "commit"; amend: boolean; signoff: boolean; noVerify: boolean }
+  // Log actions. The sha is the one the row showed, never a name that could
+  // have moved between reading the log and running the command.
+  | { op: "cherry-pick"; sha: string }
+  | { op: "revert"; sha: string }
+  | { op: "reset"; mode: ResetMode; sha: string }
   | PushPlan;
 
 /** The full ref a popup entry stands for; tags cannot shadow it. */
@@ -55,8 +72,9 @@ export function fullRef(ref: BranchRef): string {
   return ref.kind === "local" ? `refs/heads/${ref.name}` : `refs/remotes/${ref.remote}/${ref.branch}`;
 }
 
-/** The name the popup shows for a branch ref. */
-export function refLabel(ref: BranchRef): string {
+/** The name the popup shows for a ref; a log revision stands for itself. */
+export function refLabel(ref: CompareRef): string {
+  if (ref.kind === "revision") return ref.revision.length > 12 ? ref.revision.slice(0, 12) : ref.revision;
   return ref.kind === "local" ? ref.name : `${ref.remote}/${ref.branch}`;
 }
 
@@ -143,6 +161,14 @@ export function gitArgvFor(plan: GitPlan): string[] {
         ...(plan.signoff ? ["--signoff"] : []),
         ...(plan.noVerify ? ["--no-verify"] : []),
       ];
+    case "cherry-pick":
+      return ["cherry-pick", "--end-of-options", plan.sha];
+    case "revert":
+      return ["revert", "--no-edit", "--end-of-options", plan.sha];
+    case "reset":
+      // The trailing `--` keeps a file named like the sha from being taken
+      // as a pathspec, which would reset that path instead of the branch.
+      return ["reset", `--${plan.mode}`, "--end-of-options", plan.sha, "--"];
     case "push": {
       const source = plan.branch === null ? "HEAD" : `refs/heads/${plan.branch}`;
       if (plan.setUpstream) {
@@ -485,7 +511,7 @@ export function blockingReason(overview: Overview): string | null {
 // Labels (the IntelliJ strings) and quick actions
 // ---------------------------------------------------------------------------
 
-export type QuickActionId = "update" | "commit" | "fetch" | "push" | "new-branch" | "checkout-revision";
+export type QuickActionId = "update" | "commit" | "log" | "fetch" | "push" | "new-branch" | "checkout-revision";
 
 export interface QuickAction {
   id: QuickActionId;
@@ -520,6 +546,8 @@ export function quickActionsFor(overview: Overview): QuickAction[] {
     // A commit is legal on a detached HEAD and as the first commit; only a
     // blocked repository stops it.
     { id: "commit", label: "Commit...", hint: "Ctrl+K", ...disable(unavailable ? overview.unavailableReason : busyReason) },
+    // A read: it works during a job and on a branch with no commits yet.
+    { id: "log", label: "Show Git Log", hint: "Alt+9", ...disable(unavailable ? overview.unavailableReason : null) },
     {
       id: "fetch",
       label: "Fetch",
@@ -549,6 +577,7 @@ export type BranchMenuItemId =
   | "checkout-update"
   | "compare"
   | "diff-working-tree"
+  | "show-log"
   | "rebase"
   | "merge"
   | "new-worktree"
@@ -597,6 +626,8 @@ export function labelFor(id: BranchMenuItemId, branchName: string, current: stri
       return `Compare with ${cur}`;
     case "diff-working-tree":
       return "Show Diff with Working Tree";
+    case "show-log":
+      return "Show Log";
     case "rebase":
       return `Rebase ${cur} onto ${quote(branchName)}`;
     case "merge":
@@ -686,6 +717,7 @@ export function menuFor(
     items.push(item("checkout-update", first(isCurrent ? "Already checked out." : null, otherWorktree, upstreamReason, busy)));
     items.push(item("compare", first(isCurrent ? "Nothing to compare with itself." : null, noBranch), { separatorBefore: true }));
     items.push(item("diff-working-tree", null));
+    items.push(item("show-log", null));
     items.push(item("rebase", first(isCurrent ? "Already checked out." : null, noBranch, busy), { separatorBefore: true }));
     items.push(item("merge", first(isCurrent ? "Already checked out." : null, noBranch, busy)));
     items.push(item("new-worktree", first(otherWorktree, isCurrent ? "Already checked out here." : null, busy), { separatorBefore: true }));
@@ -701,6 +733,7 @@ export function menuFor(
   } else {
     items.push(item("compare", noBranch, { separatorBefore: true }));
     items.push(item("diff-working-tree", null));
+    items.push(item("show-log", null));
     items.push(item("rebase", first(noBranch, busy), { separatorBefore: true }));
     items.push(item("merge", first(noBranch, busy)));
     items.push(item("new-worktree", first(entry.branch.hasLocal ? `A local branch '${entry.branch.branch}' already exists.` : null, busy), { separatorBefore: true }));
@@ -709,6 +742,89 @@ export function menuFor(
   items.push(item("favourite", null, { separatorBefore: true }));
   items.push(item("copy-name", null));
   return items;
+}
+
+// ---------------------------------------------------------------------------
+// The log's per-commit context menu
+// ---------------------------------------------------------------------------
+
+export type CommitMenuItemId =
+  | "checkout-revision"
+  | "new-branch-from"
+  | "cherry-pick"
+  | "revert"
+  | "reset"
+  | "compare"
+  | "copy-hash";
+
+export interface ResetOption {
+  mode: ResetMode;
+  label: string;
+  description: string;
+}
+
+export interface CommitMenuItem {
+  id: CommitMenuItemId;
+  label: string;
+  disabled: boolean;
+  reason: string | null;
+  separatorBefore: boolean;
+  /** Only for `reset`. */
+  children?: readonly ResetOption[];
+}
+
+export const RESET_OPTIONS: readonly ResetOption[] = [
+  { mode: "soft", label: "Soft", description: "Move the branch only; the index and the files stay as they are." },
+  { mode: "mixed", label: "Mixed", description: "Move the branch and reset the index; the files stay as they are." },
+  { mode: "hard", label: "Hard", description: "Move the branch and throw away every change in the index and the files." },
+];
+
+export function labelForCommitItem(id: CommitMenuItemId, shortSha: string, current: string | null): string {
+  switch (id) {
+    case "checkout-revision":
+      return "Checkout Revision";
+    case "new-branch-from":
+      return `New Branch from ${quote(shortSha)}...`;
+    case "cherry-pick":
+      return "Cherry-Pick";
+    case "revert":
+      return "Revert Commit";
+    case "reset":
+      return "Reset Current Branch to Here...";
+    case "compare":
+      return `Compare with ${current === null ? "current" : quote(current)}`;
+    case "copy-hash":
+      return "Copy Revision Number";
+  }
+}
+
+/** The context menu for one log row. */
+export function commitMenuFor(commit: LogCommit, overview: Overview): CommitMenuItem[] {
+  const current = overview.head?.kind === "branch" ? overview.head.name : null;
+  const busy = blockingReason(overview);
+  const noBranch = current !== null ? null : overview.head?.kind === "unborn" ? "Make a first commit first." : "Check out a branch first.";
+  // `cherry-pick` and `revert` need `-m <parent>` for a merge, and picking
+  // that parent is a dialog this plugin does not have.
+  const isMerge = commit.parents.length > 1;
+  const mergeReason = isMerge ? "This is a merge commit; pick a parent with git on the command line." : null;
+  const first = (...reasons: (string | null)[]) => reasons.find((reason) => reason !== null) ?? null;
+  const item = (id: CommitMenuItemId, reason: string | null, extra: Partial<Pick<CommitMenuItem, "separatorBefore" | "children">> = {}): CommitMenuItem => ({
+    id,
+    label: labelForCommitItem(id, commit.shortSha, current),
+    disabled: reason !== null,
+    reason,
+    separatorBefore: extra.separatorBefore ?? false,
+    ...(extra.children === undefined ? {} : { children: extra.children }),
+  });
+  return [
+    item("checkout-revision", busy),
+    item("new-branch-from", busy),
+    item("cherry-pick", first(mergeReason, noBranch, busy), { separatorBefore: true }),
+    item("revert", first(mergeReason, noBranch, busy)),
+    item("reset", first(noBranch, busy), { children: RESET_OPTIONS }),
+    item("compare", noBranch, { separatorBefore: true }),
+    item("copy-hash", null),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -744,6 +860,12 @@ export function confirmTierFor(
       return "destructive";
     case "commit":
       return plan.amend ? "confirm" : "none";
+    case "cherry-pick":
+    case "revert":
+      return "confirm";
+    case "reset":
+      // Only --hard throws work away; soft and mixed keep the files.
+      return plan.mode === "hard" ? "destructive" : "confirm";
     case "switch":
     case "switch-track":
     case "create":

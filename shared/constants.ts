@@ -43,6 +43,19 @@ export const MAX_COMMIT_MESSAGE_BYTES = 64 * 1024;
 /** Changed files listed by the commit panel. */
 export const CHANGES_LIMIT = 500;
 
+/** Commits per log page; the host reads one more to learn whether another page exists. */
+export const LOG_PAGE_SIZE = 100;
+/** How far "Load more" may walk with `--skip`. */
+export const LOG_MAX_SKIP = 10_000;
+/** Longest message filter the log accepts; it travels as one `--grep` argument. */
+export const MAX_LOG_GREP_LENGTH = 200;
+/** Log rows are a fixed height so the list can be virtualised without measuring. */
+export const LOG_ROW_HEIGHT = 26;
+
+/** How `git reset` moves the current branch: index and worktree, index only, neither. */
+export const RESET_MODES = ["soft", "mixed", "hard"] as const;
+export type ResetMode = (typeof RESET_MODES)[number];
+
 /** Which side of a change a file diff shows: HEAD → index, or index → working tree. */
 export const DIFF_SIDES = ["index", "worktree"] as const;
 export type DiffSide = (typeof DIFF_SIDES)[number];

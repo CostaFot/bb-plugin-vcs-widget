@@ -50,6 +50,9 @@ const VERB: Record<string, string> = {
   setUpstream: "Changing the tracked branch",
   addWorktree: "Adding the worktree",
   checkoutRevision: "The checkout",
+  cherryPick: "The cherry-pick",
+  revert: "The revert",
+  resetTo: "The reset",
   stage: "Staging",
   unstage: "Unstaging",
   discard: "The discard",
@@ -412,6 +415,30 @@ export default async function plugin(bb: BbPluginApi) {
 
     diffWorkingTreePatch({ threadId, ...input }) {
       return withReadTarget(threadId, (repo) => host.call("diffWorkingTreePatch", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }), readFailure);
+    },
+
+    log({ threadId, ...input }) {
+      return withReadTarget(threadId, (repo) => host.call("log", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }), readFailure);
+    },
+
+    commitDetails({ threadId, sha }) {
+      return withReadTarget(threadId, (repo) => host.call("commitDetails", { repoPath: repo.repoPath, sha }, { hostId: repo.hostId }), readFailure);
+    },
+
+    commitPatch({ threadId, ...input }) {
+      return withReadTarget(threadId, (repo) => host.call("commitPatch", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }), readFailure);
+    },
+
+    cherryPick({ threadId, sha }) {
+      return withTarget(threadId, "cherryPick", (repo) => host.call("cherryPick", { repoPath: repo.repoPath, sha }, { hostId: repo.hostId }));
+    },
+
+    revert({ threadId, sha }) {
+      return withTarget(threadId, "revert", (repo) => host.call("revert", { repoPath: repo.repoPath, sha }, { hostId: repo.hostId }));
+    },
+
+    resetTo({ threadId, ...input }) {
+      return withTarget(threadId, "resetTo", (repo) => host.call("resetTo", { repoPath: repo.repoPath, ...input }, { hostId: repo.hostId }));
     },
 
     changes({ threadId }) {

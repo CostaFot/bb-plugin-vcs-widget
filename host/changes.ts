@@ -22,16 +22,9 @@ import {
   type ActionContext,
   type PreparedJob,
 } from "./actions";
-import { gitReadOrNull, runGit, type GitRunResult } from "./git";
+import { capPatch, hasNul, readFailure, showOrEmpty, SIDE_LIMIT_BYTES } from "./diff-text";
+import { gitReadOrNull, runGit } from "./git";
 import { detectOperation, isIndexLocked, preflight } from "./repo";
-
-/** Each complete side handed to the diff viewer is capped here; bigger files render from the patch alone. */
-export const SIDE_LIMIT_BYTES = 1024 * 1024;
-export const PATCH_LIMIT_BYTES = 1024 * 1024;
-
-function readFailure(result: GitRunResult): GitError {
-  return classifyGitFailure({ phase: "read", exitCode: result.code, stderr: result.stderr, timedOut: result.timedOut, cancelled: result.cancelled });
-}
 
 // ---------------------------------------------------------------------------
 // Reads
@@ -74,16 +67,6 @@ export async function readChanges(context: ActionContext): Promise<ChangesResult
   };
 }
 
-const BINARY_PATCH = /^Binary files .* differ$|^GIT binary patch$/mu;
-
-async function showOrEmpty(context: ActionContext, spec: string): Promise<string | null> {
-  // `show` of a path missing on that side (a new or deleted file) is "" ; a
-  // side over the cap is null so the viewer renders from the patch alone.
-  const result = await runGit(["--literal-pathspecs", "show", "--end-of-options", spec], readOptions(context));
-  if (result.code !== 0) return "";
-  return Buffer.byteLength(result.stdout, "utf8") > SIDE_LIMIT_BYTES ? null : result.stdout;
-}
-
 async function worktreeFile(context: ActionContext, path: string): Promise<string | null> {
   const absolute = join(context.repo.repoRoot, path);
   try {
@@ -95,8 +78,6 @@ async function worktreeFile(context: ActionContext, path: string): Promise<strin
     return ""; // deleted in the worktree
   }
 }
-
-const hasNul = (text: string | null) => text !== null && text.includes("\0");
 
 /**
  * The patch for one file on one side (HEAD → index, or index → working
@@ -128,10 +109,7 @@ export async function diffFile(
       }
     }
   }
-  const raw = result.stdout;
-  const truncated = Buffer.byteLength(raw, "utf8") > PATCH_LIMIT_BYTES;
-  const patch = truncated ? Buffer.from(raw, "utf8").subarray(0, PATCH_LIMIT_BYTES).toString("utf8") : raw;
-  const binary = BINARY_PATCH.test(raw);
+  const { patch, truncated, binary } = capPatch(result.stdout);
   let contents: Extract<FileDiff, { ok: true }>["contents"] = null;
   if (!binary && !truncated && patch !== "") {
     const oldPath = input.oldPath ?? input.path;

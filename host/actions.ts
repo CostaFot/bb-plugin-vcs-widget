@@ -4,12 +4,13 @@
 import { stat } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import type { ActionResult, BranchRef, CheckoutTarget, GitError, Operation, Overview } from "../contracts";
-import type { PullStrategy } from "../shared/constants";
+import type { PullStrategy, ResetMode } from "../shared/constants";
 import { classifyGitFailure, pluginGitError } from "../shared/git-errors";
 import type { GitPhase } from "../shared/git-errors";
 import { fullRef, gitArgvFor, gitCommandPreview, refLabel, type GitPlan, type PushPlan } from "../shared/model";
 import { DEADLINES_MS, MIN_OVERVIEW_MS, createBudget, type Budget } from "./budget";
 import { runGit, type GitRunResult } from "./git";
+import { parseCommitSummary } from "../shared/parse";
 import { detectOperation, preflight, readOverview, upstreamParts, type RepoInfo } from "./repo";
 
 const RECENT_LIMIT = 8;
@@ -424,6 +425,69 @@ export async function checkoutRevision(context: ActionContext, input: { revision
   const { result, deadlineMs } = await runPlan(context, plan, "mutate");
   if (result.code !== 0) return fail(context, failureFrom(phase, result, deadlineMs));
   return succeed(context, `Checked out ${input.revision} (detached HEAD at ${verify.stdout.trim().slice(0, 7)}).`);
+}
+
+// ---------------------------------------------------------------------------
+// Log actions: they name the sha the row showed, never a branch name that
+// could have moved since. Conflicts leave a cherry-pick or revert in
+// progress, which the popup's Abort concludes.
+// ---------------------------------------------------------------------------
+
+/** The commit a log row stands for, resolved to its full object name. */
+async function resolveCommit(context: ActionContext, sha: string, phase: GitPhase): Promise<string | GitError> {
+  const result = await runGit(
+    ["rev-parse", "--verify", "--quiet", "--end-of-options", `${sha}^{commit}`, "--"],
+    readOptions(context),
+  );
+  const resolved = result.stdout.trim();
+  if (result.code !== 0 || resolved === "") {
+    return pluginGitError("ref_not_found", `'${sha}' is not a commit in this repository.`, phase, {
+      hint: "The log may be out of date; refresh it.",
+    });
+  }
+  return resolved;
+}
+
+const shortSha = (sha: string) => sha.slice(0, 7);
+
+export async function cherryPick(context: ActionContext, input: { sha: string }): Promise<ActionResult> {
+  const phase: GitPhase = "cherryPick";
+  const blocked = await preflight(context.repo, phase, { touchesIndex: true, requireNoOperation: true });
+  if (blocked) return fail(context, blocked);
+  const sha = await resolveCommit(context, input.sha, phase);
+  if (isError(sha)) return fail(context, sha);
+  const plan: GitPlan = { op: "cherry-pick", sha };
+  const { result, deadlineMs } = await runPlan(context, plan, "mutate");
+  if (result.code !== 0) return fail(context, failureFrom(phase, result, deadlineMs));
+  const line = parseCommitSummary(result.stdout);
+  return succeed(context, line ? `Cherry-picked ${shortSha(sha)} as ${line.sha}: ${line.subject}` : `Cherry-picked ${shortSha(sha)}.`);
+}
+
+export async function revert(context: ActionContext, input: { sha: string }): Promise<ActionResult> {
+  const phase: GitPhase = "revert";
+  const blocked = await preflight(context.repo, phase, { touchesIndex: true, requireNoOperation: true });
+  if (blocked) return fail(context, blocked);
+  const sha = await resolveCommit(context, input.sha, phase);
+  if (isError(sha)) return fail(context, sha);
+  const plan: GitPlan = { op: "revert", sha };
+  const { result, deadlineMs } = await runPlan(context, plan, "mutate");
+  if (result.code !== 0) return fail(context, failureFrom(phase, result, deadlineMs));
+  const line = parseCommitSummary(result.stdout);
+  return succeed(context, line ? `Reverted ${shortSha(sha)} in ${line.sha}: ${line.subject}` : `Reverted ${shortSha(sha)}.`);
+}
+
+export async function resetTo(context: ActionContext, input: { sha: string; mode: ResetMode }): Promise<ActionResult> {
+  const phase: GitPhase = "reset";
+  const blocked = await preflight(context.repo, phase, { touchesIndex: true, requireNoOperation: true });
+  if (blocked) return fail(context, blocked);
+  const head = await requireBranch(context, phase, "a reset");
+  if (isError(head)) return fail(context, head);
+  const sha = await resolveCommit(context, input.sha, phase);
+  if (isError(sha)) return fail(context, sha);
+  const plan: GitPlan = { op: "reset", mode: input.mode, sha };
+  const { result, deadlineMs } = await runPlan(context, plan, "mutate");
+  if (result.code !== 0) return fail(context, failureFrom(phase, result, deadlineMs));
+  return succeed(context, `Reset ${head.name} to ${shortSha(sha)} (--${input.mode}).`);
 }
 
 // ---------------------------------------------------------------------------

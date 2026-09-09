@@ -184,7 +184,7 @@ try {
 
   await palette(page, "VCS Group");
   const rows10 = await paletteRows(page);
-  step("S10a seven palette rows", rows10.length === 7, JSON.stringify(rows10));
+  step("S10a eight palette rows", rows10.length === 8, JSON.stringify(rows10));
   await clickPaletteRow(page, "Open branches");
   await sleep(1500);
   step("S10b palette opens popup", !!(await page.$('[data-testid="vcs-branch-popup"]')));

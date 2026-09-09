@@ -15,13 +15,16 @@ import type {
   JobStart,
   JobSummary,
   LocalBranch,
+  LogCommit,
   Overview,
   RemoteBranch,
+  ResetMode,
 } from "../contracts";
 import type { rpcContract } from "../server";
 import { isValidRemoteName } from "../shared/branch-name";
 import { isPullStrategy, type PullStrategy } from "../shared/constants";
 import {
+  RESET_OPTIONS,
   confirmTierFor,
   discardPlanFor,
   discardPlans,
@@ -608,6 +611,68 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     [applyOverview, executeJob, pushWith, requestOrRun, rpc, threadId, tierContext],
   );
 
+  // -------------------------------------------------------------------------
+  // Milestone 4: the log panel
+  // -------------------------------------------------------------------------
+
+  const cherryPick = useCallback(
+    (commit: LogCommit) => {
+      const plan: GitPlan = { op: "cherry-pick", sha: commit.sha };
+      requestOrRun(
+        {
+          title: `Cherry-pick ${commit.shortSha}`,
+          description: `Applies "${commit.subject}" as a new commit on ${currentName ?? "the current branch"}. Conflicts leave the cherry-pick in progress; the popup then offers Abort.`,
+          tier: confirmTierFor(plan, tierContext()),
+          confirmLabel: "Cherry-pick",
+          command: gitCommandPreview(plan),
+        },
+        async () => {
+          await execute(`Cherry-picking ${commit.shortSha}…`, () => rpc.call("cherryPick", { threadId, sha: commit.sha }));
+        },
+      );
+    },
+    [currentName, execute, requestOrRun, rpc, threadId, tierContext],
+  );
+
+  const revert = useCallback(
+    (commit: LogCommit) => {
+      const plan: GitPlan = { op: "revert", sha: commit.sha };
+      requestOrRun(
+        {
+          title: `Revert ${commit.shortSha}`,
+          description: `Commits the inverse of "${commit.subject}" on ${currentName ?? "the current branch"}; the commit itself stays in the history.`,
+          tier: confirmTierFor(plan, tierContext()),
+          confirmLabel: "Revert",
+          command: gitCommandPreview(plan),
+        },
+        async () => {
+          await execute(`Reverting ${commit.shortSha}…`, () => rpc.call("revert", { threadId, sha: commit.sha }));
+        },
+      );
+    },
+    [currentName, execute, requestOrRun, rpc, threadId, tierContext],
+  );
+
+  const resetTo = useCallback(
+    (commit: LogCommit, mode: ResetMode) => {
+      const plan: GitPlan = { op: "reset", mode, sha: commit.sha };
+      const option = RESET_OPTIONS.find((candidate) => candidate.mode === mode);
+      requestOrRun(
+        {
+          title: `Reset ${currentName ?? "the current branch"} to ${commit.shortSha}`,
+          description: `${option?.description ?? ""} Commits after ${commit.shortSha} stay in the repository until git collects them, but ${currentName ?? "the branch"} no longer points at them.`,
+          tier: confirmTierFor(plan, tierContext()),
+          confirmLabel: `Reset --${mode}`,
+          command: gitCommandPreview(plan),
+        },
+        async () => {
+          await execute(`Resetting to ${commit.shortSha}…`, () => rpc.call("resetTo", { threadId, sha: commit.sha, mode }));
+        },
+      );
+    },
+    [currentName, execute, requestOrRun, rpc, threadId, tierContext],
+  );
+
   const cancelConfirm = useCallback(() => setConfirm(null), []);
   const acceptConfirm = useCallback(
     (toggled: boolean) => {
@@ -645,6 +710,9 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     unstage,
     discard,
     commit,
+    cherryPick,
+    revert,
+    resetTo,
     cancelConfirm,
     acceptConfirm,
     clearStatus,

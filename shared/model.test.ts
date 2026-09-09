@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { ChangeEntry, LocalBranch, Overview, RemoteBranch } from "../contracts";
+import type { ChangeEntry, LocalBranch, LogCommit, Overview, RemoteBranch } from "../contracts";
 import { unavailableOverview } from "../contracts";
 import {
   blockingReason,
+  commitMenuFor,
   confirmTierFor,
   diffSidesFor,
   discardPlanFor,
@@ -108,6 +109,10 @@ describe("gitArgvFor / gitCommandPreview", () => {
     [{ op: "rm-cached", paths: ["new.txt"] }, "git --literal-pathspecs rm -q --cached -- new.txt"],
     [{ op: "clean", paths: ["junk.txt"] }, "git --literal-pathspecs clean -f -- junk.txt"],
     [{ op: "commit", amend: false, signoff: false, noVerify: false }, "git commit -F -"],
+    [{ op: "cherry-pick", sha: "abc1234" }, "git cherry-pick --end-of-options abc1234"],
+    [{ op: "revert", sha: "abc1234" }, "git revert --no-edit --end-of-options abc1234"],
+    [{ op: "reset", mode: "hard", sha: "abc1234" }, "git reset --hard --end-of-options abc1234 --"],
+    [{ op: "reset", mode: "mixed", sha: "abc1234" }, "git reset --mixed --end-of-options abc1234 --"],
     [{ op: "commit", amend: true, signoff: true, noVerify: true }, "git commit -F - --amend --signoff --no-verify"],
   ] as const)("%j", (plan, preview) => {
     expect(gitCommandPreview(plan)).toBe(preview);
@@ -184,6 +189,7 @@ describe("quickActionsFor", () => {
     expect(quickActionsFor(overview()).map((action) => [action.id, action.disabled])).toEqual([
       ["update", false],
       ["commit", false],
+      ["log", false],
       ["fetch", false],
       ["push", false],
       ["new-branch", false],
@@ -229,6 +235,7 @@ describe("menuFor", () => {
       "Checkout and Rebase onto 'main'",
       "Compare with 'main'",
       "Show Diff with Working Tree",
+      "Show Log",
       "Rebase 'main' onto 'origin/feature'",
       "Merge 'origin/feature' into 'main'",
       "New Worktree from 'origin/feature'...",
@@ -248,6 +255,7 @@ describe("menuFor", () => {
       "checkout-update",
       "compare",
       "diff-working-tree",
+      "show-log",
       "rebase",
       "merge",
       "new-worktree",
@@ -289,7 +297,7 @@ describe("menuFor", () => {
     expect(byId.get("update")?.disabled).toBe(false);
     const blocked = menuFor({ kind: "local", branch: local("feature") }, overview({ operation: "merge" }));
     const enabled = blocked.filter((item) => !item.disabled).map((item) => item.id);
-    expect(enabled).toEqual(["compare", "diff-working-tree", "favourite", "copy-name"]);
+    expect(enabled).toEqual(["compare", "diff-working-tree", "show-log", "favourite", "copy-name"]);
     const detached = menuFor({ kind: "remote", branch: remote("origin/feature") }, overview({ head: { kind: "detached", sha: "abc1234def" } }));
     expect(detached.find((item) => item.id === "merge")?.reason).toBe("Check out a branch first.");
     expect(detached.find((item) => item.id === "checkout")?.disabled).toBe(false);
@@ -459,5 +467,55 @@ describe("headLabel", () => {
     expect(headLabel(overview({ head: { kind: "unborn", name: "main" } }), null)).toBe("main (no commits)");
     expect(headLabel(null, "sidebar")).toBe("sidebar");
     expect(headLabel(null, null)).toBe("No branch");
+  });
+});
+
+describe("commitMenuFor", () => {
+  const commit = (extra: Partial<LogCommit> = {}): LogCommit => ({
+    sha: "abc1234def5678",
+    shortSha: "abc1234",
+    author: "Costa",
+    committedAt: 1788945062,
+    subject: "a change",
+    refs: [],
+    parents: ["parent1"],
+    ...extra,
+  });
+  const item = (items: ReturnType<typeof commitMenuFor>, id: string) => items.find((entry) => entry.id === id);
+
+  it("names the current branch and offers every action on an ordinary commit", () => {
+    const items = commitMenuFor(commit(), overview());
+    expect(items.map((entry) => entry.id)).toEqual([
+      "checkout-revision",
+      "new-branch-from",
+      "cherry-pick",
+      "revert",
+      "reset",
+      "compare",
+      "copy-hash",
+    ]);
+    expect(items.every((entry) => !entry.disabled)).toBe(true);
+    expect(item(items, "new-branch-from")?.label).toBe("New Branch from 'abc1234'...");
+    expect(item(items, "compare")?.label).toBe("Compare with 'main'");
+    expect(item(items, "reset")?.children?.map((child) => child.mode)).toEqual(["soft", "mixed", "hard"]);
+  });
+
+  it("refuses to cherry-pick or revert a merge, because that needs a parent number", () => {
+    const items = commitMenuFor(commit({ parents: ["a", "b"] }), overview());
+    expect(item(items, "cherry-pick")?.reason).toMatch(/merge commit/);
+    expect(item(items, "revert")?.disabled).toBe(true);
+    expect(item(items, "checkout-revision")?.disabled).toBe(false);
+    expect(item(items, "copy-hash")?.disabled).toBe(false);
+  });
+
+  it("needs a branch for the actions that move one, and stays out of the way while a job runs", () => {
+    const detached = commitMenuFor(commit(), overview({ head: { kind: "detached", sha: "abc1234" } }));
+    expect(item(detached, "reset")?.reason).toBe("Check out a branch first.");
+    expect(item(detached, "compare")?.disabled).toBe(true);
+    expect(item(detached, "checkout-revision")?.disabled).toBe(false);
+
+    const busy = commitMenuFor(commit(), overview({ indexLocked: true }));
+    expect(item(busy, "cherry-pick")?.disabled).toBe(true);
+    expect(item(busy, "copy-hash")?.disabled).toBe(false);
   });
 });

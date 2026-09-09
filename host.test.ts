@@ -949,3 +949,205 @@ describe.skipIf(process.platform === "win32")("job deadlines and cancellation", 
     expect(await survivors()).toEqual([]);
   });
 });
+
+describe("log", () => {
+  let logRepo: string;
+  /** first, second, side work, the merge, and a change to a.txt: newest first. */
+  const shas = new Map<string, string>();
+
+  beforeAll(async () => {
+    logRepo = join(root, "log-repo");
+    await exec("git", ["init", "-q", "-b", "main", logRepo], { env: GIT_ENV });
+    await commit(logRepo, "a.txt", "a\n", "first");
+    shas.set("first", await git(logRepo, "rev-parse", "HEAD"));
+    await commit(logRepo, "b.txt", "b\n", "second");
+    await git(logRepo, "switch", "-q", "-c", "side", shas.get("first") as string);
+    await commit(logRepo, "s.txt", "s\n", "side work");
+    shas.set("side", await git(logRepo, "rev-parse", "HEAD"));
+    await git(logRepo, "switch", "-q", "main");
+    await git(logRepo, "merge", "-q", "--no-ff", "-m", "Merge branch 'side'", "side");
+    shas.set("merge", await git(logRepo, "rev-parse", "HEAD"));
+    await commit(logRepo, "a.txt", "a\nchanged\n", "last");
+    shas.set("last", await git(logRepo, "rev-parse", "HEAD"));
+  }, 60_000);
+
+  const page = (input: Partial<Parameters<typeof harness.experimental_call<"log">>[1]> = {}) =>
+    harness.experimental_call("log", { repoPath: logRepo, filter: { kind: "all" }, grep: null, skip: 0, ...input });
+
+  it("reads a page of commits with their decorations and parents", async () => {
+    const result = await page();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result).toMatchObject({ skip: 0, hasMore: false });
+    expect(result.commits.map((entry) => entry.subject)).toEqual(["last", "Merge branch 'side'", "side work", "second", "first"]);
+    expect(result.commits[0]).toMatchObject({ sha: shas.get("last"), author: "VCS Test" });
+    expect(result.commits[0]?.refs).toEqual([
+      { kind: "head", name: "HEAD" },
+      { kind: "local", name: "main" },
+    ]);
+    expect(result.commits[1]?.parents).toHaveLength(2);
+    expect(result.commits.at(-1)?.parents).toEqual([]);
+  });
+
+  it("walks only the selected refs and skips whole pages", async () => {
+    const head = await page({ filter: { kind: "head" } });
+    expect(head.ok && head.commits).toHaveLength(5);
+    const side = await page({ filter: { kind: "ref", ref: local("side") } });
+    expect(side.ok && side.commits.map((entry) => entry.subject)).toEqual(["side work", "first"]);
+    const skipped = await page({ skip: 3 });
+    expect(skipped.ok && skipped.commits.map((entry) => entry.subject)).toEqual(["second", "first"]);
+    expect(skipped.ok && skipped.skip).toBe(3);
+  });
+
+  it("filters the message literally, never as a regular expression", async () => {
+    const found = await page({ grep: "SIDE WORK" });
+    expect(found.ok && found.commits.map((entry) => entry.subject)).toEqual(["side work"]);
+    // As a regex "side." would match "side'" in the merge subject.
+    const literal = await page({ grep: "side." });
+    expect(literal.ok && literal.commits).toEqual([]);
+  });
+
+  it("answers with an empty page before the first commit", async () => {
+    const unborn = join(root, "log-unborn");
+    await exec("git", ["init", "-q", "-b", "main", unborn], { env: GIT_ENV });
+    expect(await harness.experimental_call("log", { repoPath: unborn, filter: { kind: "all" }, grep: null, skip: 0 })).toEqual({
+      ok: true,
+      commits: [],
+      skip: 0,
+      hasMore: false,
+    });
+    expect(await harness.experimental_call("log", { repoPath: unborn, filter: { kind: "head" }, grep: null, skip: 0 })).toMatchObject({
+      ok: true,
+      commits: [],
+    });
+  });
+
+  it("reads one page at a time when the history is longer than a page", async () => {
+    const many = join(root, "log-many");
+    await exec("git", ["init", "-q", "-b", "main", many], { env: GIT_ENV });
+    await commit(many, "a.txt", "a\n", "c0");
+    for (let index = 1; index <= 101; index += 1) {
+      await git(many, "commit", "-q", "--allow-empty", "-m", `c${index}`);
+    }
+    const first = await harness.experimental_call("log", { repoPath: many, filter: { kind: "all" }, grep: null, skip: 0 });
+    expect(first).toMatchObject({ ok: true, hasMore: true });
+    expect(first.ok && first.commits).toHaveLength(100);
+    expect(first.ok && first.commits[0]?.subject).toBe("c101");
+    const second = await harness.experimental_call("log", { repoPath: many, filter: { kind: "all" }, grep: null, skip: 100 });
+    expect(second).toMatchObject({ ok: true, hasMore: false });
+    expect(second.ok && second.commits.map((entry) => entry.subject)).toEqual(["c1", "c0"]);
+  }, 60_000);
+
+  it("describes one commit and the files it changed", async () => {
+    const details = await harness.experimental_call("commitDetails", { repoPath: logRepo, sha: shas.get("last") as string });
+    expect(details.ok).toBe(true);
+    if (!details.ok) return;
+    expect(details.commit).toMatchObject({ subject: "last", message: "last", author: "VCS Test", authorEmail: "vcs@example.com" });
+    expect(details.commit.committedAt).toBeGreaterThan(0);
+    expect(details.againstParent).toBe(shas.get("merge"));
+    expect(details.files).toEqual([{ path: "a.txt", oldPath: null, additions: 1, deletions: 0, binary: false }]);
+    expect(details.truncated).toBe(false);
+  });
+
+  it("diffs a merge against its first parent and the initial commit against nothing", async () => {
+    const merge = await harness.experimental_call("commitDetails", { repoPath: logRepo, sha: shas.get("merge") as string });
+    expect(merge.ok && merge.commit.parents).toHaveLength(2);
+    expect(merge.ok && merge.files.map((file) => file.path)).toEqual(["s.txt"]);
+    const initial = await harness.experimental_call("commitDetails", { repoPath: logRepo, sha: shas.get("first") as string });
+    expect(initial.ok && initial.againstParent).toBeNull();
+    expect(initial.ok && initial.files.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(await harness.experimental_call("commitDetails", { repoPath: logRepo, sha: "deadbeef" })).toMatchObject({
+      ok: false,
+      error: { code: "ref_not_found" },
+    });
+  });
+
+  it("patches one file of a commit with both complete sides", async () => {
+    const patch = await harness.experimental_call("commitPatch", {
+      repoPath: logRepo,
+      sha: shas.get("last") as string,
+      path: "a.txt",
+      oldPath: null,
+    });
+    expect(patch).toMatchObject({ ok: true, path: "a.txt", truncated: false, binary: false });
+    if (!patch.ok) return;
+    expect(patch.patch).toContain("+changed");
+    expect(patch.contents).toEqual({ old: { path: "a.txt", content: "a\n" }, new: { path: "a.txt", content: "a\nchanged\n" } });
+    const initial = await harness.experimental_call("commitPatch", {
+      repoPath: logRepo,
+      sha: shas.get("first") as string,
+      path: "a.txt",
+      oldPath: null,
+    });
+    expect(initial.ok && initial.patch).toContain("+a");
+    expect(initial.ok && initial.contents?.old.content).toBe("");
+    await expect(
+      harness.experimental_call("commitPatch", { repoPath: logRepo, sha: shas.get("last") as string, path: "../etc/passwd", oldPath: null }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("cherry-pick, revert and reset", () => {
+  let work: string;
+  let sideSha: string;
+  let baseSha: string;
+
+  beforeAll(async () => {
+    work = join(root, "log-actions");
+    await exec("git", ["init", "-q", "-b", "main", work], { env: GIT_ENV });
+    await commit(work, "a.txt", "a\n", "first");
+    baseSha = await git(work, "rev-parse", "HEAD");
+    await git(work, "switch", "-q", "-c", "side");
+    await commit(work, "s.txt", "s\n", "side work");
+    sideSha = await git(work, "rev-parse", "HEAD");
+    await git(work, "switch", "-q", "main");
+  }, 60_000);
+
+  it("cherry-picks a commit onto the current branch", async () => {
+    const result = await harness.experimental_call("cherryPick", { repoPath: work, sha: sideSha });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.message).toMatch(/Cherry-picked/u);
+    expect(await git(work, "log", "-1", "--format=%s")).toBe("side work");
+    expect(await git(work, "show", "--no-patch", "--format=%s", "HEAD")).toBe("side work");
+  });
+
+  it("reverts the commit it just picked", async () => {
+    const result = await harness.experimental_call("revert", { repoPath: work, sha: await git(work, "rev-parse", "HEAD") });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.message).toMatch(/Reverted/u);
+    expect(await git(work, "log", "-1", "--format=%s")).toMatch(/^Revert /u);
+  });
+
+  it("resets the current branch to a commit and refuses without one", async () => {
+    const result = await harness.experimental_call("resetTo", { repoPath: work, sha: baseSha, mode: "hard" });
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.message).toContain("--hard");
+    expect(await git(work, "rev-parse", "HEAD")).toBe(baseSha);
+    expect(await git(work, "log", "--format=%s")).toBe("first");
+
+    await git(work, "switch", "-q", "--detach", baseSha);
+    expect(await harness.experimental_call("resetTo", { repoPath: work, sha: baseSha, mode: "mixed" })).toMatchObject({
+      ok: false,
+      error: { code: "detached_head" },
+    });
+    await git(work, "switch", "-q", "main");
+  });
+
+  it("refuses a commit that is not in the repository and a repository mid-operation", async () => {
+    expect(await harness.experimental_call("cherryPick", { repoPath: work, sha: "deadbeef" })).toMatchObject({
+      ok: false,
+      error: { code: "ref_not_found" },
+    });
+    await writeFile(join(work, ".git", "MERGE_HEAD"), `${baseSha}\n`);
+    try {
+      expect(await harness.experimental_call("revert", { repoPath: work, sha: baseSha })).toMatchObject({
+        ok: false,
+        error: { code: "operation_in_progress" },
+      });
+    } finally {
+      await rm(join(work, ".git", "MERGE_HEAD"));
+    }
+  });
+});

@@ -9,6 +9,7 @@ import { useSidebarThread } from "../hooks/use-sidebar-thread";
 import { toRef, useVcsActions } from "../hooks/use-vcs-actions";
 import { OPEN_EVENT, takeOpenRequest } from "../lib/events";
 import type { rpcContract } from "../server";
+import { PANEL_ACTION } from "../shared/panel-params";
 import { entryKey, headLabel, refLabel, type BranchEntry, type BranchMenuItemId, type QuickActionId } from "../shared/model";
 import { BranchPopup } from "./BranchPopup";
 import type { MenuExtra } from "./BranchRow";
@@ -23,9 +24,6 @@ export interface BranchButtonProps {
   projectId: string;
   isCompactViewport: boolean;
 }
-
-/** Panel tabs this plugin registers in app.tsx. */
-export const PANEL_ACTION = { compare: "compare", diff: "diff", commit: "commit" } as const;
 
 /**
  * The thread-header control: a 28 px branch button that opens the Git
@@ -83,10 +81,14 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
     const handler = () => {
       const request = takeOpenRequest(threadId);
       if (request === null) return;
-      // The commit dialog is a panel tab; the palette row goes straight
-      // there instead of flashing the popup.
+      // The commit dialog and the log are panel tabs; their palette rows go
+      // straight there instead of flashing the popup.
       if (request.action === "commit") {
         openPanel(PANEL_ACTION.commit, "Commit", {});
+        return;
+      }
+      if (request.action === "log") {
+        openPanel(PANEL_ACTION.log, "Git Log", {});
         return;
       }
       openPopup();
@@ -124,6 +126,9 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
       case "commit":
         openPanel(PANEL_ACTION.commit, "Commit", {});
         return;
+      case "log":
+        openPanel(PANEL_ACTION.log, "Git Log", {});
+        return;
       case "fetch":
         void actions.fetch();
         return;
@@ -151,6 +156,9 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
         return;
       case "diff-working-tree":
         openPanel(PANEL_ACTION.diff, `Working tree vs ${label}`, { ref });
+        return;
+      case "show-log":
+        openPanel(PANEL_ACTION.log, `Log: ${label}`, { filter: { kind: "ref", ref } });
         return;
       case "rebase":
         actions.rebase(ref, null);

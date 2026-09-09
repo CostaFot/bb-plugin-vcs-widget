@@ -6,7 +6,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 afterEach(() => cleanup());
 import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
-import type { ActionResult, ChangesResult, JobStart, Overview } from "./contracts";
+import type { ActionResult, ChangesResult, JobStart, LogCommit, Overview } from "./contracts";
 import type { JobKind } from "./shared/constants";
 import { unavailableOverview } from "./contracts";
 import { requestOpen } from "./lib/events";
@@ -179,9 +179,9 @@ function render(options: {
         checkoutRevision: (input) => ({ ok: true, message: `Checked out ${input.revision}.`, overview: view }),
         listTags: () => ({ ok: true, tags: [{ name: "v1.0", sha: "abc1234", createdAt: 1, subject: "one" }], truncated: false }),
         compare: () => ({ ok: true, base: "main", target: "feature", aheadCount: 1, behindCount: 0, ahead: [{ sha: "a".repeat(40), shortSha: "aaaaaaa", author: "Costa", committedAt: 1, subject: "feature work" }], behind: [], files: [{ path: "a.txt", oldPath: null, additions: 1, deletions: 0, binary: false }], truncated: { ahead: false, behind: false, files: false } }),
-        comparePatch: (input) => ({ ok: true, path: input.path, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false }),
+        comparePatch: (input) => ({ ok: true, path: input.path, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: null }),
         diffWorkingTree: () => ({ ok: true, ref: "main", files: [], truncated: false }),
-        diffWorkingTreePatch: (input) => ({ ok: true, path: input.path, patch: "", truncated: false, binary: false }),
+        diffWorkingTreePatch: (input) => ({ ok: true, path: input.path, patch: "", truncated: false, binary: false, contents: null }),
         favourites: () => ({ names: favourites }),
         setFavourite: (input) => {
           favourites = input.favourite ? [...favourites, input.name] : favourites.filter((name) => name !== input.name);
@@ -193,6 +193,12 @@ function render(options: {
         unstage: (input) => ({ ok: true, message: `Unstaged ${input.paths.length} file(s).`, overview: view }),
         discard: () => ({ ok: true, message: "Discarded.", overview: view }),
         commit: () => job("commit"),
+        log: () => ({ ok: true, commits: [], skip: 0, hasMore: false }),
+        commitDetails: () => ({ ok: false, error: { code: "ref_not_found", message: "gone" } }),
+        commitPatch: (input) => ({ ok: true, path: input.path, patch: "", truncated: false, binary: false, contents: null }),
+        cherryPick: () => ({ ok: true, message: "Cherry-picked.", overview: view }),
+        revert: () => ({ ok: true, message: "Reverted.", overview: view }),
+        resetTo: () => ({ ok: true, message: "Reset.", overview: view }),
         ...options.rpc,
       },
     },
@@ -484,6 +490,7 @@ describe("context menu", () => {
       "Checkout and Update",
       "Compare with 'main'",
       "Show Diff with Working Tree",
+      "Show Log",
       "Rebase 'main' onto 'feature'",
       "Merge 'feature' into 'main'",
       "New Worktree from 'feature'...",
@@ -645,8 +652,8 @@ describe("operations and force push", () => {
 });
 
 describe("panels", () => {
-  it("registers the compare, diff and commit panel tabs", () => {
-    expect(app.threadPanelActions.map((action) => action.id)).toEqual(["compare", "diff", "commit"]);
+  it("registers the compare, diff, commit and log panel tabs", () => {
+    expect(app.threadPanelActions.map((action) => action.id)).toEqual(["compare", "diff", "commit", "log"]);
   });
 
   it("renders the comparison and a file's patch", async () => {
@@ -659,7 +666,7 @@ describe("panels", () => {
         sidebarThreads: sidebarThread({ id: "env1", branchName: "main" }),
         rpc: {
           compare: () => ({ ok: true, base: "main", target: "feature", aheadCount: 1, behindCount: 0, ahead: [{ sha: "a".repeat(40), shortSha: "aaaaaaa", author: "Costa", committedAt: 1, subject: "feature work" }], behind: [], files: [{ path: "a.txt", oldPath: null, additions: 1, deletions: 0, binary: false }], truncated: { ahead: false, behind: false, files: false } }),
-          comparePatch: (input: { path: string }) => ({ ok: true, path: input.path, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false }),
+          comparePatch: (input: { path: string }) => ({ ok: true, path: input.path, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: null }),
         } as never,
       },
     );
@@ -825,5 +832,240 @@ describe("opening the commit panel", () => {
     await waitFor(() => expect(opened).toHaveLength(2));
     await new Promise((done) => setTimeout(done, 50));
     expect(screen.queryByTestId("vcs-branch-popup")).toBeNull();
+  });
+});
+
+describe("LogPanel", () => {
+  type LogRpc = Record<string, (input: never) => unknown>;
+
+  const commit = (extra: Partial<LogCommit> = {}): LogCommit => ({
+    sha: "a".repeat(40),
+    shortSha: "aaaaaaa",
+    author: "Costa",
+    committedAt: 1_700_000_000,
+    subject: "a change",
+    refs: [
+      { kind: "head", name: "HEAD" },
+      { kind: "local", name: "main" },
+    ],
+    parents: ["b".repeat(40)],
+    ...extra,
+  });
+
+  const DETAILS = {
+    ok: true as const,
+    commit: {
+      ...commit(),
+      authorEmail: "costa@example.com",
+      authoredAt: 1_700_000_000,
+      committer: "Costa",
+      committerEmail: "costa@example.com",
+      message: "a change\n\nWhy it changed.",
+    },
+    files: [{ path: "a.txt", oldPath: null, additions: 2, deletions: 1, binary: false }],
+    truncated: false,
+    againstParent: "b".repeat(40),
+  };
+
+  function renderLogPanel(options: { params?: Record<string, unknown>; rpc?: LogRpc; overview?: Overview; openThreadPanel?: (options: { actionId: string; title?: string; params?: unknown }) => boolean } = {}) {
+    const view = options.overview ?? overview();
+    const panel = app.threadPanelActions.find((action) => action.id === "log")!;
+    return renderSlot<PluginThreadPanelProps, typeof rpcContract>(
+      panel,
+      { threadId: "t1", params: (options.params ?? {}) as never },
+      {
+        sidebarThreads: sidebarThread({ id: "env1", branchName: "main" }),
+        settings: { updateStrategy: "ff-only", autoStash: false, confirmBeforePush: true, defaultRemote: "origin", fetchPrune: true },
+        ...(options.openThreadPanel ? { openThreadPanel: options.openThreadPanel } : {}),
+        rpc: {
+          overview: () => view,
+          log: () => ({ ok: true, commits: [commit(), commit({ sha: "b".repeat(40), shortSha: "bbbbbbb", subject: "Merge branch 'x'", refs: [], parents: ["c".repeat(40), "d".repeat(40)] })], skip: 0, hasMore: false }),
+          commitDetails: () => DETAILS,
+          commitPatch: (input: { path: string }) => ({ ok: true, path: input.path, patch: "@@ -1 +1 @@\n-a\n+b\n", truncated: false, binary: false, contents: null }),
+          cherryPick: () => ({ ok: true, message: "Cherry-picked aaaaaaa.", overview: view }),
+          revert: () => ({ ok: true, message: "Reverted aaaaaaa.", overview: view }),
+          resetTo: () => ({ ok: true, message: "Reset main to aaaaaaa (--hard).", overview: view }),
+          createBranch: () => ({ ok: true, message: "Created.", overview: view }),
+          checkoutRevision: () => ({ ok: true, message: "Checked out.", overview: view }),
+          jobGet: () => null,
+          jobCancel: () => ({ cancelled: true }),
+          ...options.rpc,
+        } as never,
+      },
+    );
+  }
+
+  const openCommitMenu = async (slot: { container: HTMLElement }, sha: string) => {
+    const row = slot.container.querySelector(`[data-sha="${sha}"]`);
+    if (!(row instanceof HTMLElement)) throw new Error(`no row for ${sha}`);
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    return screen.findByTestId("vcs-commit-menu");
+  };
+
+  it("lists commits with their ref badges and reads the log once", async () => {
+    const slot = renderLogPanel();
+    await slot.findByText("a change");
+    expect(slot.getByText("Merge branch 'x'")).toBeTruthy();
+    expect(slot.getByTestId("vcs-log-count").textContent).toBe("2");
+    const badges = Array.from(slot.container.querySelectorAll("[data-ref-kind]")).map((node) => [node.getAttribute("data-ref-kind"), node.textContent]);
+    expect(badges).toEqual([
+      ["head", "HEAD"],
+      ["local", "main"],
+    ]);
+    const reads = slot.inspection.rpcCalls.filter((call) => call.method === "log");
+    expect(reads).toHaveLength(1);
+    expect(reads[0]?.input).toEqual({ threadId: "t1", filter: { kind: "all" }, grep: null, skip: 0 });
+  });
+
+  it("opens the tab on a branch when the popup asked for one", async () => {
+    const slot = renderLogPanel({ params: { filter: { kind: "ref", ref: { kind: "local", name: "feature" } } } });
+    await slot.findByText("a change");
+    expect(slot.inspection.rpcCalls.find((call) => call.method === "log")?.input).toMatchObject({ filter: { kind: "ref", ref: { kind: "local", name: "feature" } } });
+    expect((slot.getByTestId("vcs-log-filter") as HTMLSelectElement).value).toBe("ref:feature");
+    const ignored = renderLogPanel({ params: { filter: { kind: "ref", ref: { kind: "local", name: "-bad" } } } });
+    await ignored.findByText("a change");
+    expect(ignored.inspection.rpcCalls.find((call) => call.method === "log")?.input).toMatchObject({ filter: { kind: "all" } });
+  });
+
+  it("reads again for a branch filter and for a message filter", async () => {
+    const user = userEvent.setup();
+    const slot = renderLogPanel();
+    await slot.findByText("a change");
+    await user.selectOptions(slot.getByTestId("vcs-log-filter"), "head");
+    await waitFor(() => expect(slot.inspection.rpcCalls.filter((call) => call.method === "log")).toHaveLength(2));
+    expect(slot.inspection.rpcCalls.at(-1)?.input).toMatchObject({ filter: { kind: "head" } });
+    await user.type(slot.getByTestId("vcs-log-search"), "fix");
+    await waitFor(() => expect(slot.inspection.rpcCalls.at(-1)?.input).toMatchObject({ grep: "fix" }), { timeout: 2_000 });
+  });
+
+  it("shows the selected commit, its files and one file's diff", async () => {
+    const user = userEvent.setup();
+    const slot = renderLogPanel();
+    await user.click(await slot.findByText("a change"));
+    await slot.findByTestId("vcs-log-details");
+    expect(slot.getByTestId("vcs-log-sha").textContent).toBe("a".repeat(40));
+    expect(slot.getByText(/Why it changed/u)).toBeTruthy();
+    await user.click(slot.getByText("a.txt"));
+    await slot.findByTestId("vcs-patch");
+    expect(slot.inspection.rpcCalls.at(-1)).toEqual({
+      method: "commitPatch",
+      input: { threadId: "t1", sha: "a".repeat(40), path: "a.txt", oldPath: null },
+    });
+    await user.click(slot.getByTestId("vcs-log-back"));
+    await slot.findByTestId("vcs-log-details");
+  });
+
+  it("asks with the exact command before a cherry-pick, a revert and a reset", async () => {
+    const user = userEvent.setup();
+    const sha = "a".repeat(40);
+    const slot = renderLogPanel();
+    await slot.findByText("a change");
+
+    const menu = await openCommitMenu(slot, sha);
+    await user.click(within(menu).getByText("Cherry-Pick"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe(`git cherry-pick --end-of-options ${sha}`);
+    await user.click(screen.getByText("Cherry-pick", { selector: "button" }));
+    await waitFor(() => expect(slot.inspection.rpcCalls.at(-1)).toEqual({ method: "cherryPick", input: { threadId: "t1", sha } }));
+
+    const again = await openCommitMenu(slot, sha);
+    await user.click(within(again).getByText("Revert Commit"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe(`git revert --no-edit --end-of-options ${sha}`);
+    await user.click(screen.getByText("Revert", { selector: "button" }));
+    await waitFor(() => expect(slot.inspection.rpcCalls.at(-1)).toEqual({ method: "revert", input: { threadId: "t1", sha } }));
+
+    const third = await openCommitMenu(slot, sha);
+    // Radix opens a submenu on pointer move, which userEvent's hover sends.
+    await user.hover(within(third).getByText("Reset Current Branch to Here..."));
+    // A plain click: Radix's submenu items swallow userEvent's pointer
+    // sequence under jsdom.
+    fireEvent.click(await screen.findByText("Hard"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe(`git reset --hard --end-of-options ${sha} --`);
+    await user.click(screen.getByText("Reset --hard", { selector: "button" }));
+    await waitFor(() => expect(slot.inspection.rpcCalls.at(-1)).toEqual({ method: "resetTo", input: { threadId: "t1", sha, mode: "hard" } }));
+  });
+
+  it("ignores the release of the right-click that opened the menu", async () => {
+    const slot = renderLogPanel();
+    await slot.findByText("a change");
+    const menu = await openCommitMenu(slot, "a".repeat(40));
+    const checkout = within(menu).getByText("Checkout Revision");
+    // Radix clicks an item on a pointerup it saw no pointerdown for, which is
+    // the release of the right-click when the menu opened under the pointer.
+    fireEvent.pointerUp(checkout);
+    await new Promise((done) => setTimeout(done, 50));
+    expect(screen.queryByTestId("vcs-command-preview")).toBeNull();
+    // A real click still opens the confirm dialog with its command.
+    fireEvent.click(checkout);
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe(`git switch --detach --end-of-options ${"a".repeat(40)}`);
+  });
+
+  it("refuses to cherry-pick or revert a merge commit", async () => {
+    const slot = renderLogPanel();
+    await slot.findByText("Merge branch 'x'");
+    const menu = await openCommitMenu(slot, "b".repeat(40));
+    expect(within(menu).getByText("Cherry-Pick").getAttribute("data-disabled")).not.toBeNull();
+    expect(within(menu).getByText("Revert Commit").getAttribute("data-disabled")).not.toBeNull();
+    expect(within(menu).getByText("Copy Revision Number").getAttribute("data-disabled")).toBeNull();
+  });
+
+  it("creates a branch from a commit and opens the compare tab against the current branch", async () => {
+    const user = userEvent.setup();
+    const sha = "a".repeat(40);
+    const opened: { actionId: string; params?: unknown }[] = [];
+    const slot = renderLogPanel({
+      openThreadPanel: (options) => {
+        opened.push({ actionId: options.actionId, params: options.params });
+        return true;
+      },
+    });
+    await slot.findByText("a change");
+
+    const menu = await openCommitMenu(slot, sha);
+    await user.click(within(menu).getByText("New Branch from 'aaaaaaa'..."));
+    await user.type(await screen.findByLabelText("New branch name"), "from-log");
+    await user.click(screen.getByText("Create", { selector: "button" }));
+    await waitFor(() =>
+      expect(slot.inspection.rpcCalls.at(-1)).toEqual({
+        method: "createBranch",
+        input: { threadId: "t1", name: "from-log", startPoint: sha, checkout: true },
+      }),
+    );
+
+    const again = await openCommitMenu(slot, sha);
+    await user.click(within(again).getByText("Compare with 'main'"));
+    await waitFor(() =>
+      expect(opened).toEqual([
+        { actionId: "compare", params: { base: { kind: "local", name: "main" }, target: { kind: "revision", revision: sha } } },
+      ]),
+    );
+  });
+
+  it("reports a git failure and an empty log without pretending to have rows", async () => {
+    const failing = renderLogPanel({ rpc: { log: () => ({ ok: false, error: { code: "git_failed", message: "log failed", hint: "try again" } }) } });
+    expect(await failing.findByText("log failed")).toBeTruthy();
+    expect(failing.getByText("try again")).toBeTruthy();
+    const empty = renderLogPanel({ rpc: { log: () => ({ ok: true, commits: [], skip: 0, hasMore: false }) } });
+    expect(await empty.findByText("No commit yet.")).toBeTruthy();
+  });
+
+  it("loads the next page and keeps the rows it already has", async () => {
+    const user = userEvent.setup();
+    let call = 0;
+    const slot = renderLogPanel({
+      rpc: {
+        log: () => {
+          call += 1;
+          return call === 1
+            ? { ok: true, commits: [commit()], skip: 0, hasMore: true }
+            : { ok: true, commits: [commit(), commit({ sha: "c".repeat(40), shortSha: "ccccccc", subject: "older", refs: [], parents: [] })], skip: 1, hasMore: false };
+        },
+      },
+    });
+    await slot.findByText("a change");
+    await user.click(slot.getByTestId("vcs-log-more"));
+    await slot.findByText("older");
+    // The repeated commit arrives once.
+    expect(slot.container.querySelectorAll(`[data-sha="${"a".repeat(40)}"]`)).toHaveLength(1);
+    expect(slot.inspection.rpcCalls.at(-1)?.input).toMatchObject({ skip: 1 });
   });
 });

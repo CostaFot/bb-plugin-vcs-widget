@@ -6,10 +6,11 @@ import { Icon, type IconName } from "@/components/ui/icon";
 const ICONS: Record<QuickActionId, IconName> = {
   update: "ArrowDown",
   commit: "Check",
+  log: "Clock",
   fetch: "ArrowReloadHorizontal",
   push: "ArrowUp",
   "new-branch": "Plus",
-  "checkout-revision": "Clock",
+  "checkout-revision": "TimeSchedule",
 };
 
 interface QuickActionsProps {

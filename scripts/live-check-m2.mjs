@@ -2,7 +2,7 @@
 // context menu, favourites, rename, delete (-d then -D), tracked branch,
 // compare and diff panels, merge, conflict + abort, rebase, tag checkout,
 // worktree, background jobs (fetch, update, push, force-with-lease, remote
-// delete, cancel), seven palette rows.
+// delete, cancel), the palette rows.
 //
 //   node scripts/live-check.mjs setup /tmp/vcs-scratch          # once
 //   VCS_E2E_THREAD=thr_x VCS_E2E_PROJECT=proj_x node scripts/live-check-m2.mjs /tmp/vcs-scratch
@@ -40,7 +40,7 @@ try {
   await H.openPopup(page);
   await H.openMenu(page, "feature");
   const labels = await H.menuLabels(page);
-  step("M2-1 context menu lists the IntelliJ rows", labels.length === 16 && labels[0] === "Checkout" && labels.includes("Merge 'feature' into 'main'") && labels.includes("Tracked Branch"), JSON.stringify(labels));
+  step("M2-1 context menu lists the IntelliJ rows", labels.length === 17 && labels[0] === "Checkout" && labels.includes("Merge 'feature' into 'main'") && labels.includes("Show Log") && labels.includes("Tracked Branch"), JSON.stringify(labels));
   await H.shot(page, "m2-1-menu");
   await page.keyboard.press("Escape");
   await sleep(400);
@@ -261,10 +261,10 @@ try {
   step("M2-17 Delete on a remote branch runs as a job", cmd17 === `git push --no-progress --delete --end-of-options origin refs/heads/${PB}` && /Deleted origin\/.* on the remote/.test(st17) && !bareHeads().includes(PB), `cmd="${cmd17}" st="${st17}"`);
   await H.closePopup(page);
 
-  // M2-18 seven palette rows
+  // M2-18 the palette rows
   await H.palette(page, "VCS Group");
   const rows18 = await H.paletteRows(page);
-  step("M2-18 seven palette rows", rows18.length === 7 && rows18.some((row) => /Checkout Tag or Revision/.test(row)), JSON.stringify(rows18));
+  step("M2-18 eight palette rows", rows18.length === 8 && rows18.some((row) => /Checkout Tag or Revision/.test(row)), JSON.stringify(rows18));
   await page.keyboard.press("Escape");
   await sleep(300);
 
