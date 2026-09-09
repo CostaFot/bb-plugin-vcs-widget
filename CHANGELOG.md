@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Three small ones off the backlog: what the popup remembers, what the watcher
+ignores, and what the click-through prints when it fails.
+
+- A confirmed action's outcome now survives the popup closing. Push, merge,
+  rebase, delete and the rest close the popup and report by toast, and the
+  toast is usually gone by the time you look again -- so reopening within a
+  minute still shows how it went, its hint and its stderr. Past five seconds
+  the outcome is dated (`· 12 s ago`) and the repository summary joins it
+  underneath, so a retained line reads as history rather than as now.
+- The host's file watch dropped every event for a repository whose own path
+  contained one of the names it ignores inside a git dir -- anything under a
+  directory called `modules`, `logs`, `objects`, `info`, `hooks` or `lfs`.
+  Those worktrees never refreshed on their own. The ignore list is read
+  relative to the watched directory now, which is also how the daemon reads
+  it.
+- The headless click-through prints the DOM state when a click on the branch
+  button does not open the popup, instead of a bare timeout: whether the
+  button is reachable by a hit test, what is there instead, the body's
+  pointer-events, the active element, any `aria-hidden` or `inert` ancestor
+  and every open layer with its `data-state`, plus a screenshot.
+
 ## 0.6.0 (2026-09-09)
 
 Three things the commit panel was missing, and a pass over the paperwork

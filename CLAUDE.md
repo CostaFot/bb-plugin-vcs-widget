@@ -38,6 +38,12 @@ comments (`claude: step N done, <what>`), never in files here.
 - COS-146 Costa reads `README.md` and `PLUGIN_OVERVIEW.md` himself, rendered,
   before the plugin goes public — done 2026-09-09; the overview's opening line
   now matches the README's, nothing came out of the README pass
+- COS-128 a confirmed action's outcome survives the popup closing for a
+  minute, dated past five seconds with the repository summary under it, and
+  COS-129 the watch ignore syntax verified against bb's watcher (plain names,
+  root-relative, measured) with the absolute-path bug in `relevant()` fixed —
+  shipped 2026-09-09. COS-127 stays open: the popup that once did not reopen
+  has not recurred, but `openPopup` now prints the DOM state when it happens
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
