@@ -23,12 +23,22 @@ describe("classifyGitFailure", () => {
     ["non_fast_forward", "fatal: Not possible to fast-forward, aborting."],
     ["detached_head", "fatal: You are not currently on a branch.\nPlease specify which branch you want to merge with."],
     ["not_a_repo", "fatal: not a git repository (or any of the parent directories): .git"],
+    ["not_fully_merged", "error: the branch 'z' is not fully merged\nhint: If you are sure you want to delete it, run 'git branch -D z'"],
+    ["path_exists", "fatal: 'feature' is already checked out at '/w/repo-feature'"],
+    ["non_fast_forward", "From /o\n ! [rejected]        main       -> feat  (non-fast-forward)"],
     ["git_failed", "fatal: something entirely unexpected happened"],
   ] as const)("classifies %s", (code, stderr) => {
     const result = classifyGitFailure({ phase: "push", exitCode: 128, stderr });
     expect(result.code).toBe(code);
     expect(result.message).toMatch(/^Push failed/u);
     expect(result.stderr).toBe(stderr);
+  });
+
+  it("headlines the line that decided the code, even when it is not the first", () => {
+    const merge = classifyGitFailure({ phase: "merge", exitCode: 1, stderr: "", stdout: "Auto-merging a.txt\nCONFLICT (content): Merge conflict in a.txt\nAutomatic merge failed; fix conflicts and then commit the result.\n" });
+    expect(merge).toMatchObject({ code: "conflict", message: "Merge failed: CONFLICT (content): Merge conflict in a.txt" });
+    const push = classifyGitFailure({ phase: "push", exitCode: 1, stderr: "To github.com:x/y.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs to 'github.com:x/y.git'" });
+    expect(push.message).toBe("Push failed: [rejected]        main -> main (fetch first)");
   });
 
   it("reports timeouts and cancellations before reading stderr", () => {

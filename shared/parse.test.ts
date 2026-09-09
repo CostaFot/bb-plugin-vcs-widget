@@ -3,8 +3,12 @@ import {
   gitVersionAtLeast,
   parseForEachRef,
   parseGitVersion,
+  parseLeftRightCount,
+  parseLog,
+  parseNumstat,
   parseRecentFromReflog,
   parseStatusV2,
+  parseTags,
   parseUpstreamTrack,
   splitRemoteRef,
 } from "./parse";
@@ -161,5 +165,34 @@ describe("git version", () => {
     expect(gitVersionAtLeast("2.23.1", 2, 24)).toBe(false);
     expect(gitVersionAtLeast("3.0", 2, 24)).toBe(true);
     expect(gitVersionAtLeast(null, 2, 24)).toBe(true);
+  });
+});
+
+describe("parseLog / parseNumstat / parseTags", () => {
+  it("parses log records with NUL-separated fields", () => {
+    const raw = "e39c38c412631e1e46b086779dfbb09d7528009f\x00e39c38c\x00Costa\x001788945062\x00Fix: a\x00b\n54291b34c4ef9a47490d6e1f44e488b94a5adc7b\x0054291b3\x00t\x001788945061\x00first\n";
+    expect(parseLog(raw)).toEqual([
+      { sha: "e39c38c412631e1e46b086779dfbb09d7528009f", shortSha: "e39c38c", author: "Costa", committedAt: 1788945062, subject: "Fix: a\x00b" },
+      { sha: "54291b34c4ef9a47490d6e1f44e488b94a5adc7b", shortSha: "54291b3", author: "t", committedAt: 1788945061, subject: "first" },
+    ]);
+  });
+
+  it("parses numstat -z including renames and binaries", () => {
+    const raw = "1\t0\ta.txt\x00-\t-\timg.png\x003\t2\t\x00old/name.ts\x00new/name.ts\x00";
+    expect(parseNumstat(raw)).toEqual([
+      { path: "a.txt", oldPath: null, additions: 1, deletions: 0, binary: false },
+      { path: "img.png", oldPath: null, additions: 0, deletions: 0, binary: true },
+      { path: "new/name.ts", oldPath: "old/name.ts", additions: 3, deletions: 2, binary: false },
+    ]);
+    expect(parseNumstat("")).toEqual([]);
+  });
+
+  it("parses tags and left-right counts", () => {
+    expect(parseTags("v1.0\x00abc1234\x001700000000\x00release 1.0\nv0.9\x00def5678\x00\x00\n")).toEqual([
+      { name: "v1.0", sha: "abc1234", createdAt: 1700000000, subject: "release 1.0" },
+      { name: "v0.9", sha: "def5678", createdAt: 0, subject: "" },
+    ]);
+    expect(parseLeftRightCount("3\t5\n")).toEqual({ left: 3, right: 5 });
+    expect(parseLeftRightCount("")).toEqual({ left: 0, right: 0 });
   });
 });

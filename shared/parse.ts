@@ -230,3 +230,97 @@ export function gitVersionAtLeast(version: string | null, major: number, minor: 
   const actualMinor = Number.parseInt(b, 10);
   return actualMajor > major || (actualMajor === major && actualMinor >= minor);
 }
+
+// ---------------------------------------------------------------------------
+// Compare and diff payloads
+// ---------------------------------------------------------------------------
+
+/** `git log --format=<LOG_FORMAT>`: full sha, short sha, author, unix time, subject. */
+export const LOG_FORMAT = "%H%x00%h%x00%an%x00%ct%x00%s";
+
+export interface ParsedCommit {
+  sha: string;
+  shortSha: string;
+  author: string;
+  committedAt: number;
+  subject: string;
+}
+
+export function parseLog(raw: string): ParsedCommit[] {
+  const commits: ParsedCommit[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.length === 0) continue;
+    const [sha, shortSha, author, committedAt, ...subject] = line.split("\0");
+    if (!sha || !shortSha) continue;
+    commits.push({
+      sha,
+      shortSha,
+      author: author ?? "",
+      committedAt: Number.parseInt(committedAt ?? "0", 10) || 0,
+      subject: subject.join("\0"),
+    });
+  }
+  return commits;
+}
+
+export interface ParsedFileChange {
+  path: string;
+  oldPath: string | null;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+/**
+ * Parses `git diff --numstat -z [-M]`: `add\tdel\tpath\0`, and for a rename
+ * or copy `add\tdel\t\0old\0new\0`. Binary files print `-\t-`.
+ */
+export function parseNumstat(raw: string): ParsedFileChange[] {
+  const files: ParsedFileChange[] = [];
+  const tokens = raw.split("\0");
+  for (let index = 0; index < tokens.length; index += 1) {
+    const record = tokens[index] ?? "";
+    if (record.length === 0) continue;
+    const [added = "", deleted = "", path = ""] = record.split("\t");
+    const binary = added === "-" || deleted === "-";
+    const additions = binary ? 0 : Number.parseInt(added, 10) || 0;
+    const deletions = binary ? 0 : Number.parseInt(deleted, 10) || 0;
+    if (path.length > 0) {
+      files.push({ path, oldPath: null, additions, deletions, binary });
+      continue;
+    }
+    const oldPath = tokens[index + 1] ?? "";
+    const newPath = tokens[index + 2] ?? "";
+    index += 2;
+    if (newPath.length === 0) continue;
+    files.push({ path: newPath, oldPath: oldPath.length > 0 ? oldPath : null, additions, deletions, binary });
+  }
+  return files;
+}
+
+/** `for-each-ref refs/tags` fields: short name, peeled or own sha, creator date, subject. */
+export const TAG_FORMAT = "%(refname:short)%00%(objectname:short)%00%(creatordate:unix)%00%(subject)";
+
+export interface ParsedTag {
+  name: string;
+  sha: string;
+  createdAt: number;
+  subject: string;
+}
+
+export function parseTags(raw: string): ParsedTag[] {
+  const tags: ParsedTag[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.length === 0) continue;
+    const [name, sha, createdAt, ...subject] = line.split("\0");
+    if (!name || !sha) continue;
+    tags.push({ name, sha, createdAt: Number.parseInt(createdAt ?? "0", 10) || 0, subject: subject.join("\0") });
+  }
+  return tags;
+}
+
+/** "3\t5" from `rev-list --left-right --count a...b` -> { left, right }. */
+export function parseLeftRightCount(raw: string): { left: number; right: number } {
+  const [left = "0", right = "0"] = raw.trim().split(/\s+/u);
+  return { left: Number.parseInt(left, 10) || 0, right: Number.parseInt(right, 10) || 0 };
+}

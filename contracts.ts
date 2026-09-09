@@ -2,13 +2,14 @@
 //
 //   app.tsx  --rpcContract (keyed by threadId)-->  server.ts
 //   server.ts --hostContract (keyed by repoPath)--> host.ts
+//   host.ts  --hostSignals (jobEvent, changed)-->  server.ts
 //
 // server.ts and host.ts import this at runtime; app.tsx imports only types.
 // Only @get-bb/plugin-sdk and zod may be imported here: the host artifact
 // build rejects private @bb/* packages.
-import { defineRpcContract } from "@get-bb/plugin-sdk";
+import { defineRpcContract, type ExperimentalHostSignals } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { PULL_STRATEGIES } from "./shared/constants";
+import { JOB_KINDS, PULL_STRATEGIES } from "./shared/constants";
 import {
   MAX_BRANCH_NAME_LENGTH,
   isValidGitBranchName,
@@ -33,6 +34,18 @@ export const remoteNameSchema = z
 export const refishSchema = z
   .string()
   .refine(isValidRefish, { message: "Invalid revision" });
+
+/** An abbreviated or full object name. */
+export const shaSchema = z.string().regex(/^[0-9a-f]{4,64}$/u, { message: "Invalid object name" });
+
+/** A repository-relative path as git prints it; the host passes it after `--`. */
+export const repoFilePathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((path) => !path.startsWith("/") && !path.split("/").includes("..") && !path.includes("\0"), {
+    message: "Invalid repository path",
+  });
 
 // ---------------------------------------------------------------------------
 // Overview: everything the popup renders, produced by the host.
@@ -77,6 +90,18 @@ export const remoteBranchSchema = z
   })
   .strict();
 
+export const jobKindSchema = z.enum(JOB_KINDS);
+
+/** What every client can learn about a running job from the overview. */
+export const jobSummarySchema = z
+  .object({
+    jobId: z.string().min(1),
+    kind: jobKindSchema,
+    command: z.string(),
+    startedAt: count,
+  })
+  .strict();
+
 export const overviewSchema = z
   .object({
     /** Set when the thread has no usable git worktree; lists are then empty. */
@@ -112,6 +137,8 @@ export const overviewSchema = z
     recent: z.array(z.string()),
     remotes: z.array(z.string()),
     truncated: z.object({ local: z.boolean(), remote: z.boolean() }).strict(),
+    /** The background job holding this repository, if any. */
+    activeJob: jobSummarySchema.nullable(),
   })
   .strict();
 
@@ -138,6 +165,9 @@ export const GIT_ERROR_CODES = [
   "cancelled",
   "not_a_repo",
   "head_changed",
+  "not_fully_merged",
+  "path_exists",
+  "git_too_old",
   "git_failed",
 ] as const;
 export const gitErrorCodeSchema = z.enum(GIT_ERROR_CODES);
@@ -160,29 +190,145 @@ export const actionResultSchema = z.union([
     .strict(),
 ]);
 
+const failure = z.object({ ok: z.literal(false), error: gitErrorSchema }).strict();
+
+// ---------------------------------------------------------------------------
+// Jobs: network operations that outlive one host call.
+// ---------------------------------------------------------------------------
+
+export const jobEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("started"), command: z.string() }).strict(),
+  z.object({ kind: z.literal("output"), line: z.string() }).strict(),
+  z.object({ kind: z.literal("finished"), result: actionResultSchema }).strict(),
+]);
+
+export const jobStateSchema = jobSummarySchema
+  .extend({
+    status: z.enum(["running", "finished"]),
+    finishedAt: count.nullable(),
+    /** The last lines git printed (progress is off, so this is short). */
+    output: z.array(z.string()),
+    result: actionResultSchema.nullable(),
+  })
+  .strict();
+
+/** Answer to a job-starting call: the job, or a pre-flight failure. */
+export const jobStartSchema = z.union([
+  jobSummarySchema.extend({ ok: z.literal(true) }).strict(),
+  z.object({ ok: z.literal(false), error: gitErrorSchema, overview: overviewSchema.nullable() }).strict(),
+]);
+
+const jobTimeoutMs = z.number().int().min(1_000).max(3_600_000);
+
+/** Host -> server events; the server republishes them on realtime. */
+export const hostSignals = {
+  jobEvent: {
+    payload: z.object({ jobId: z.string().min(1), repoRoot: z.string(), event: jobEventSchema }).strict(),
+  },
+  changed: {
+    payload: z.object({ repoRoot: z.string(), reason: z.string() }).strict(),
+  },
+} satisfies ExperimentalHostSignals;
+
+// ---------------------------------------------------------------------------
+// Read payloads for the panels and the revision step
+// ---------------------------------------------------------------------------
+
+export const commitSchema = z
+  .object({ sha: z.string(), shortSha: z.string(), author: z.string(), committedAt: count, subject: z.string() })
+  .strict();
+
+export const fileChangeSchema = z
+  .object({
+    path: z.string(),
+    /** Set for a rename or copy. */
+    oldPath: z.string().nullable(),
+    additions: count,
+    deletions: count,
+    binary: z.boolean(),
+  })
+  .strict();
+
+export const compareResultSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      base: z.string(),
+      target: z.string(),
+      aheadCount: count,
+      behindCount: count,
+      /** Commits only on `target`, newest first. */
+      ahead: z.array(commitSchema),
+      /** Commits only on `base`, newest first. */
+      behind: z.array(commitSchema),
+      /** `base...target`: what merging target into base would change. */
+      files: z.array(fileChangeSchema),
+      truncated: z.object({ ahead: z.boolean(), behind: z.boolean(), files: z.boolean() }).strict(),
+    })
+    .strict(),
+  failure,
+]);
+
+export const patchResultSchema = z.union([
+  z.object({ ok: z.literal(true), path: z.string(), patch: z.string(), truncated: z.boolean(), binary: z.boolean() }).strict(),
+  failure,
+]);
+
+export const workingTreeDiffSchema = z.union([
+  z
+    .object({
+      ok: z.literal(true),
+      ref: z.string(),
+      files: z.array(fileChangeSchema),
+      truncated: z.boolean(),
+    })
+    .strict(),
+  failure,
+]);
+
+export const tagSchema = z
+  .object({ name: z.string(), sha: z.string(), createdAt: count, subject: z.string() })
+  .strict();
+
+export const tagListSchema = z.union([
+  z.object({ ok: z.literal(true), tags: z.array(tagSchema), truncated: z.boolean() }).strict(),
+  failure,
+]);
+
 // ---------------------------------------------------------------------------
 // Action inputs
 // ---------------------------------------------------------------------------
 
-export const checkoutTargetSchema = z.discriminatedUnion("kind", [
+/** A branch as the popup lists it: local by name, or remote by remote and branch. */
+export const branchRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local"), name: branchNameSchema }).strict(),
   z
     .object({ kind: z.literal("remote"), remote: remoteNameSchema, branch: branchNameSchema })
     .strict(),
 ]);
+export const checkoutTargetSchema = branchRefSchema;
 
 export { PULL_STRATEGIES };
 export const pullStrategySchema = z.enum(PULL_STRATEGIES);
 
 /**
  * Push is the one action whose previewed command must equal the executed one.
- * `expectedBranch` is the branch the dialog named; `setUpstream` false means
- * "push HEAD to the upstream that existed when the dialog was shown", and the
- * host refuses (typed) rather than improvising when either no longer holds.
+ * `expectedBranch` is the branch the dialog named. With `source` "head" the
+ * host refuses (typed) when HEAD is no longer on it; with "branch" the host
+ * pushes `refs/heads/<expectedBranch>` whatever HEAD is. `setUpstream` false
+ * means "push to the upstream that existed when the dialog was shown", and
+ * the host refuses rather than improvising when it no longer holds. `lease`
+ * is the remote sha the dialog saw and turns into
+ * `--force-with-lease=refs/heads/<upstream>:<lease>`; plain `--force` does
+ * not exist.
  */
 const pushFields = {
   setUpstream: z.boolean(),
   expectedBranch: branchNameSchema,
+  source: z.enum(["head", "branch"]).default("head"),
+  /** The local sha the dialog saw; null skips the check. */
+  expectedSha: shaSchema.nullable().default(null),
+  lease: shaSchema.nullable().default(null),
 };
 
 const createBranchFields = {
@@ -192,12 +338,31 @@ const createBranchFields = {
   checkout: z.boolean(),
 };
 
+const deleteBranchFields = { name: branchNameSchema, force: z.boolean() };
+const renameBranchFields = { from: branchNameSchema, to: branchNameSchema };
+const mergeFields = { ref: branchRefSchema };
+const rebaseFields = { onto: branchRefSchema, checkoutFirst: branchRefSchema.nullable() };
+const setUpstreamFields = {
+  branch: branchNameSchema,
+  upstream: z.object({ remote: remoteNameSchema, branch: branchNameSchema }).strict().nullable(),
+};
+const addWorktreeFields = { ref: branchRefSchema, path: z.string().min(1).max(4096) };
+const checkoutRevisionFields = { revision: refishSchema };
+const compareFields = { base: branchRefSchema, target: branchRefSchema };
+const comparePatchFields = { ...compareFields, path: repoFilePathSchema };
+const diffWorkingTreeFields = { ref: branchRefSchema };
+const diffWorkingTreePatchFields = { ...diffWorkingTreeFields, path: repoFilePathSchema };
+const updateBranchFields = { branch: branchNameSchema };
+const deleteRemoteBranchFields = { remote: remoteNameSchema, branch: branchNameSchema };
+const jobFields = { jobId: z.string().min(1).max(128) };
+
 // ---------------------------------------------------------------------------
 // Browser -> server. Every input carries the thread; the server resolves the
 // environment and the settings-backed defaults (null means "use the setting").
 // ---------------------------------------------------------------------------
 
 const threadInput = z.object({ threadId: z.string().min(1) });
+const favouriteNames = z.object({ names: z.array(z.string()) }).strict();
 
 export const rpcContract = defineRpcContract({
   overview: {
@@ -216,18 +381,94 @@ export const rpcContract = defineRpcContract({
     input: threadInput
       .extend({ remote: remoteNameSchema.nullable(), prune: z.boolean().nullable() })
       .strict(),
-    output: actionResultSchema,
+    output: jobStartSchema,
   },
   pull: {
     input: threadInput
       .extend({ strategy: pullStrategySchema.nullable(), autoStash: z.boolean().nullable() })
       .strict(),
-    output: actionResultSchema,
+    output: jobStartSchema,
   },
   push: {
     /** remote null = the default-remote setting (only meaningful with setUpstream). */
     input: threadInput.extend({ remote: remoteNameSchema.nullable(), ...pushFields }).strict(),
+    output: jobStartSchema,
+  },
+  updateBranch: {
+    input: threadInput.extend(updateBranchFields).strict(),
+    output: jobStartSchema,
+  },
+  deleteRemoteBranch: {
+    input: threadInput.extend(deleteRemoteBranchFields).strict(),
+    output: jobStartSchema,
+  },
+  jobGet: {
+    input: threadInput.extend(jobFields).strict(),
+    output: jobStateSchema.nullable(),
+  },
+  jobCancel: {
+    input: threadInput.extend(jobFields).strict(),
+    output: z.object({ cancelled: z.boolean() }).strict(),
+  },
+  deleteBranch: {
+    input: threadInput.extend(deleteBranchFields).strict(),
     output: actionResultSchema,
+  },
+  renameBranch: {
+    input: threadInput.extend(renameBranchFields).strict(),
+    output: actionResultSchema,
+  },
+  merge: {
+    input: threadInput.extend(mergeFields).strict(),
+    output: actionResultSchema,
+  },
+  rebase: {
+    input: threadInput.extend(rebaseFields).strict(),
+    output: actionResultSchema,
+  },
+  abortOperation: {
+    input: threadInput.strict(),
+    output: actionResultSchema,
+  },
+  setUpstream: {
+    input: threadInput.extend(setUpstreamFields).strict(),
+    output: actionResultSchema,
+  },
+  addWorktree: {
+    input: threadInput.extend(addWorktreeFields).strict(),
+    output: actionResultSchema,
+  },
+  checkoutRevision: {
+    input: threadInput.extend(checkoutRevisionFields).strict(),
+    output: actionResultSchema,
+  },
+  listTags: {
+    input: threadInput.strict(),
+    output: tagListSchema,
+  },
+  compare: {
+    input: threadInput.extend(compareFields).strict(),
+    output: compareResultSchema,
+  },
+  comparePatch: {
+    input: threadInput.extend(comparePatchFields).strict(),
+    output: patchResultSchema,
+  },
+  diffWorkingTree: {
+    input: threadInput.extend(diffWorkingTreeFields).strict(),
+    output: workingTreeDiffSchema,
+  },
+  diffWorkingTreePatch: {
+    input: threadInput.extend(diffWorkingTreePatchFields).strict(),
+    output: patchResultSchema,
+  },
+  favourites: {
+    input: threadInput.strict(),
+    output: favouriteNames,
+  },
+  setFavourite: {
+    input: threadInput.extend({ name: z.string().min(1).max(512), favourite: z.boolean() }).strict(),
+    output: favouriteNames,
   },
 });
 
@@ -253,16 +494,88 @@ export const hostContract = defineRpcContract({
   },
   fetch: {
     /** remote null = every remote (`--all`). */
-    input: repoInput.extend({ remote: remoteNameSchema.nullable(), prune: z.boolean() }).strict(),
-    output: actionResultSchema,
+    input: repoInput
+      .extend({ remote: remoteNameSchema.nullable(), prune: z.boolean(), timeoutMs: jobTimeoutMs })
+      .strict(),
+    output: jobStartSchema,
   },
   pull: {
-    input: repoInput.extend({ strategy: pullStrategySchema, autoStash: z.boolean() }).strict(),
-    output: actionResultSchema,
+    input: repoInput
+      .extend({ strategy: pullStrategySchema, autoStash: z.boolean(), timeoutMs: jobTimeoutMs })
+      .strict(),
+    output: jobStartSchema,
   },
   push: {
-    input: repoInput.extend({ remote: remoteNameSchema, ...pushFields }).strict(),
+    input: repoInput.extend({ remote: remoteNameSchema, ...pushFields, timeoutMs: jobTimeoutMs }).strict(),
+    output: jobStartSchema,
+  },
+  updateBranch: {
+    input: repoInput.extend({ ...updateBranchFields, timeoutMs: jobTimeoutMs }).strict(),
+    output: jobStartSchema,
+  },
+  deleteRemoteBranch: {
+    input: repoInput.extend({ ...deleteRemoteBranchFields, timeoutMs: jobTimeoutMs }).strict(),
+    output: jobStartSchema,
+  },
+  jobGet: {
+    input: repoInput.extend(jobFields).strict(),
+    output: jobStateSchema.nullable(),
+  },
+  jobCancel: {
+    input: repoInput.extend(jobFields).strict(),
+    output: z.object({ cancelled: z.boolean() }).strict(),
+  },
+  deleteBranch: {
+    input: repoInput.extend(deleteBranchFields).strict(),
     output: actionResultSchema,
+  },
+  renameBranch: {
+    input: repoInput.extend(renameBranchFields).strict(),
+    output: actionResultSchema,
+  },
+  merge: {
+    input: repoInput.extend(mergeFields).strict(),
+    output: actionResultSchema,
+  },
+  rebase: {
+    input: repoInput.extend(rebaseFields).strict(),
+    output: actionResultSchema,
+  },
+  abortOperation: {
+    input: repoInput.strict(),
+    output: actionResultSchema,
+  },
+  setUpstream: {
+    input: repoInput.extend(setUpstreamFields).strict(),
+    output: actionResultSchema,
+  },
+  addWorktree: {
+    input: repoInput.extend(addWorktreeFields).strict(),
+    output: actionResultSchema,
+  },
+  checkoutRevision: {
+    input: repoInput.extend(checkoutRevisionFields).strict(),
+    output: actionResultSchema,
+  },
+  listTags: {
+    input: repoInput.strict(),
+    output: tagListSchema,
+  },
+  compare: {
+    input: repoInput.extend(compareFields).strict(),
+    output: compareResultSchema,
+  },
+  comparePatch: {
+    input: repoInput.extend(comparePatchFields).strict(),
+    output: patchResultSchema,
+  },
+  diffWorkingTree: {
+    input: repoInput.extend(diffWorkingTreeFields).strict(),
+    output: workingTreeDiffSchema,
+  },
+  diffWorkingTreePatch: {
+    input: repoInput.extend(diffWorkingTreePatchFields).strict(),
+    output: patchResultSchema,
   },
 });
 
@@ -278,9 +591,33 @@ export type Overview = z.infer<typeof overviewSchema>;
 export type GitErrorCode = z.infer<typeof gitErrorCodeSchema>;
 export type GitError = z.infer<typeof gitErrorSchema>;
 export type ActionResult = z.infer<typeof actionResultSchema>;
-export type CheckoutTarget = z.infer<typeof checkoutTargetSchema>;
+export type BranchRef = z.infer<typeof branchRefSchema>;
+export type CheckoutTarget = BranchRef;
 export type PullStrategy = z.infer<typeof pullStrategySchema>;
 export type Upstream = NonNullable<Overview["upstream"]>;
+export type JobSummary = z.infer<typeof jobSummarySchema>;
+export type JobEvent = z.infer<typeof jobEventSchema>;
+export type JobState = z.infer<typeof jobStateSchema>;
+export type JobStart = z.infer<typeof jobStartSchema>;
+export type Commit = z.infer<typeof commitSchema>;
+export type FileChange = z.infer<typeof fileChangeSchema>;
+export type CompareResult = z.infer<typeof compareResultSchema>;
+export type PatchResult = z.infer<typeof patchResultSchema>;
+export type WorkingTreeDiff = z.infer<typeof workingTreeDiffSchema>;
+export type Tag = z.infer<typeof tagSchema>;
+export type TagList = z.infer<typeof tagListSchema>;
+export type HostSignals = typeof hostSignals;
+export type JobEventSignal = z.infer<HostSignals["jobEvent"]["payload"]>;
+export type ChangedSignal = z.infer<HostSignals["changed"]["payload"]>;
+
+/** What the server publishes on the `job` realtime channel. */
+export interface JobRealtimePayload {
+  /** null when the server did not start this job itself (it restarted meanwhile). */
+  environmentId: string | null;
+  hostId: string;
+  jobId: string;
+  event: JobEvent;
+}
 
 /** An overview for a thread without a usable repository. */
 export function unavailableOverview(reason: string): Overview {
@@ -299,5 +636,6 @@ export function unavailableOverview(reason: string): Overview {
     recent: [],
     remotes: [],
     truncated: { local: false, remote: false },
+    activeJob: null,
   };
 }

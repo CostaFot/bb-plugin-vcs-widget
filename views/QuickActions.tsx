@@ -8,6 +8,7 @@ const ICONS: Record<QuickActionId, IconName> = {
   fetch: "ArrowReloadHorizontal",
   push: "ArrowUp",
   "new-branch": "Plus",
+  "checkout-revision": "Clock",
 };
 
 interface QuickActionsProps {

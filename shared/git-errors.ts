@@ -10,7 +10,17 @@ export type GitPhase =
   | "createBranch"
   | "fetch"
   | "pull"
-  | "push";
+  | "push"
+  | "updateBranch"
+  | "deleteBranch"
+  | "renameBranch"
+  | "merge"
+  | "rebase"
+  | "abort"
+  | "setUpstream"
+  | "worktree"
+  | "checkoutRevision"
+  | "compare";
 
 export interface GitFailureInput {
   phase: GitPhase;
@@ -32,10 +42,12 @@ interface Rule {
 // before network because git prints "Could not read from remote repository"
 // for both.
 const RULES: readonly Rule[] = [
+  { code: "not_fully_merged", pattern: /is not fully merged/i },
   { code: "index_locked", pattern: /index\.lock|Another git process seems to be running|cannot lock ref|Unable to create .*\.lock/i },
   { code: "operation_in_progress", pattern: /You have not concluded your merge|MERGE_HEAD exists|rebase in progress|rebase-merge|rebase-apply|interactive rebase already started|cherry-pick (?:or revert )?is already in progress|A cherry-pick or revert is already in progress|revert is already in progress|Please, commit your changes before you merge/i },
   { code: "dirty_worktree", pattern: /would be overwritten by (?:checkout|merge|rebase)|Your local changes to the following files|Please commit your changes or stash them|cannot pull with rebase: You have unstaged changes|You have unstaged changes|Cannot rebase: Your index contains uncommitted changes|Please commit or stash them/i },
   { code: "conflict", pattern: /CONFLICT \(|Automatic merge failed|could not apply|Resolve all conflicts|fix conflicts and then|Merge conflict in|error: could not apply/i },
+  { code: "path_exists", pattern: /is already checked out at|already used by worktree at|is already used by worktree|destination path '.*' already exists/im },
   { code: "ref_exists", pattern: /a branch named '.*' already exists|already exists\.?$/im },
   { code: "invalid_ref_name", pattern: /is not a valid branch name|not a valid ref name|invalid branch name|check-ref-format|is not a valid refname|'.*' is not a valid/i },
   { code: "ref_not_found", pattern: /pathspec '.*' did not match|invalid reference: |unknown revision or path|Needed a single revision|not something we can merge|couldn't find remote ref|invalid upstream|fatal: ambiguous argument|ambiguous object name|refname '.*' is ambiguous|no such branch/i },
@@ -80,14 +92,24 @@ const HINTS: Partial<Record<GitErrorCode, Partial<Record<GitPhase | "any", strin
     any: "The branches diverged.",
   },
   conflict: {
-    any: "Resolve the conflicts in the worktree and finish the operation from a terminal; conflict handling in the popup arrives in a later milestone.",
+    any: "Resolve the conflicts in the worktree and continue from a terminal, or use Abort in the popup to go back.",
+  },
+  not_fully_merged: {
+    any: "The branch has commits that are not on any other branch. Delete anyway discards them.",
+  },
+  path_exists: {
+    worktree: "Pick another directory, or the branch is already checked out in a worktree.",
+    any: "Something with that name already exists.",
+  },
+  git_too_old: {
+    any: "The plugin needs git 2.24 or newer on the machine that owns this worktree.",
   },
   detached_head: { any: "Check out a branch first." },
   busy: { any: "Another VCS action on this repository is still running." },
   timeout: {
-    fetch: "Large fetches move to background jobs in a later milestone.",
-    pull: "Large updates move to background jobs in a later milestone.",
-    push: "Large pushes move to background jobs in a later milestone.",
+    fetch: "Raise the job timeout in the plugin settings for large fetches.",
+    pull: "Raise the job timeout in the plugin settings for large updates.",
+    push: "Raise the job timeout in the plugin settings for large pushes.",
     any: "Try again.",
   },
   not_a_repo: { any: "Open a thread whose workspace is inside a git repository." },
@@ -102,6 +124,16 @@ const PHASE_VERB: Record<GitPhase, string> = {
   fetch: "Fetch",
   pull: "Update Project",
   push: "Push",
+  updateBranch: "Update",
+  deleteBranch: "Delete",
+  renameBranch: "Rename",
+  merge: "Merge",
+  rebase: "Rebase",
+  abort: "Abort",
+  setUpstream: "Tracked Branch",
+  worktree: "New Worktree",
+  checkoutRevision: "Checkout",
+  compare: "Compare",
 };
 
 export function hintFor(code: GitErrorCode, phase: GitPhase): string | undefined {
@@ -121,6 +153,14 @@ export function firstStderrLine(stderr: string): string {
     .filter((candidate) => candidate.length > 0 && !candidate.startsWith("hint:"));
   const line = lines.find((candidate) => !/^To \S+$/u.test(candidate)) ?? lines[0];
   return (line ?? "").replace(/^(?:fatal|error|warning):\s*/iu, "").replace(/^!\s+/u, "");
+}
+
+function firstMatchingLine(text: string, pattern: RegExp): string | undefined {
+  const line = text
+    .split(/\r?\n/u)
+    .map((candidate) => candidate.trim())
+    .find((candidate) => candidate.length > 0 && !candidate.startsWith("hint:") && pattern.test(candidate));
+  return line?.replace(/^(?:fatal|error|warning):\s*/iu, "").replace(/^!\s+/u, "");
 }
 
 export function classifyGitFailure(input: GitFailureInput): GitError {
@@ -147,7 +187,10 @@ export function classifyGitFailure(input: GitFailureInput): GitError {
   const haystack = `${stderr}\n${input.stdout ?? ""}`;
   const rule = RULES.find((candidate) => candidate.pattern.test(haystack));
   const code: GitErrorCode = rule?.code ?? "git_failed";
-  const detail = firstStderrLine(stderr) || firstStderrLine(input.stdout ?? "");
+  // The line that decided the code explains more than whatever came first
+  // ("CONFLICT (content): ..." over "Auto-merging a.txt").
+  const decisive = rule === undefined ? undefined : firstMatchingLine(haystack, rule.pattern);
+  const detail = decisive ?? (firstStderrLine(stderr) || firstStderrLine(input.stdout ?? ""));
   const message = detail
     ? `${verb} failed: ${detail}`
     : `${verb} failed${input.exitCode === null ? "" : ` (exit ${input.exitCode})`}.`;

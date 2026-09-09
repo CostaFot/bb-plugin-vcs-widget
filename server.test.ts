@@ -1,6 +1,6 @@
 import { createFakePluginHost } from "@get-bb/plugin-sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActionResult, Overview } from "./contracts";
+import type { ActionResult, JobStart, Overview } from "./contracts";
 import { unavailableOverview } from "./contracts";
 import plugin from "./server";
 
@@ -92,8 +92,18 @@ function setup(options: {
   return { bb, harness, hostCalls, subscriptions, released };
 }
 
+const JOB_METHODS = new Set(["fetch", "pull", "push", "updateBranch", "deleteRemoteBranch"]);
+
 function defaultHostResult(call: HostCall): unknown {
   if (call.method === "overview") return overview();
+  if (JOB_METHODS.has(call.method)) {
+    const start: JobStart = { ok: true, jobId: `job-${call.method}`, kind: call.method as JobStart extends { kind: infer K } ? K : never, command: `git ${call.method}`, startedAt: 1 };
+    return start;
+  }
+  if (call.method === "jobGet") return null;
+  if (call.method === "jobCancel") return { cancelled: true };
+  if (call.method === "listTags") return { ok: true, tags: [], truncated: false };
+  if (call.method === "compare") return { ok: true, base: "main", target: "feature", aheadCount: 0, behindCount: 0, ahead: [], behind: [], files: [], truncated: { ahead: false, behind: false, files: false } };
   const result: ActionResult = { ok: true, message: `${call.method} done`, overview: overview() };
   return result;
 }
@@ -195,12 +205,13 @@ describe("server", () => {
     await harness.behavior.callRpc("push", { threadId: "t1", remote: null, setUpstream: true, expectedBranch: "main" });
     await harness.behavior.callRpc("push", { threadId: "t1", remote: "mirror", setUpstream: false, expectedBranch: "main" });
     await harness.behavior.callRpc("pull", { threadId: "t1", strategy: "ff-only", autoStash: false });
+    const push = { source: "head", expectedSha: null, lease: null, timeoutMs: 600_000 };
     expect(hostCalls.map((call) => [call.method, call.input])).toEqual([
-      ["pull", { repoPath: "/repo", strategy: "rebase", autoStash: true }],
-      ["fetch", { repoPath: "/repo", remote: null, prune: false }],
-      ["push", { repoPath: "/repo", remote: "upstream", setUpstream: true, expectedBranch: "main" }],
-      ["push", { repoPath: "/repo", remote: "mirror", setUpstream: false, expectedBranch: "main" }],
-      ["pull", { repoPath: "/repo", strategy: "ff-only", autoStash: false }],
+      ["pull", { repoPath: "/repo", strategy: "rebase", autoStash: true, timeoutMs: 600_000 }],
+      ["fetch", { repoPath: "/repo", remote: null, prune: false, timeoutMs: 600_000 }],
+      ["push", { repoPath: "/repo", remote: "upstream", setUpstream: true, expectedBranch: "main", ...push }],
+      ["push", { repoPath: "/repo", remote: "mirror", setUpstream: false, expectedBranch: "main", ...push }],
+      ["pull", { repoPath: "/repo", strategy: "ff-only", autoStash: false, timeoutMs: 600_000 }],
     ]);
   });
 
@@ -254,6 +265,106 @@ describe("server", () => {
     expect(harness.realtimeSignals).toEqual([
       { channel: "changed", payload: { environmentId: "env9", reason: "environment-changed" } },
     ]);
+  });
+
+  it("clamps the job timeout setting and passes push fields through", async () => {
+    const { bb, harness, hostCalls } = setup({ settings: { jobTimeoutSeconds: 5 } });
+    await plugin(bb);
+    await harness.behavior.callRpc("push", { threadId: "t1", remote: "origin", setUpstream: false, expectedBranch: "feat", source: "branch", expectedSha: "abc1234", lease: "def5678" });
+    expect(hostCalls[0]?.input).toEqual({ repoPath: "/repo", remote: "origin", setUpstream: false, expectedBranch: "feat", source: "branch", expectedSha: "abc1234", lease: "def5678", timeoutMs: 30_000 });
+    const long = setup({ settings: { jobTimeoutSeconds: 100 } });
+    await plugin(long.bb);
+    await long.harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null });
+    expect(long.hostCalls[0]?.input).toMatchObject({ timeoutMs: 100_000 });
+  });
+
+  it("relays job events to the app and refreshes when a job it started finishes", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    const start = (await harness.behavior.callRpc("pull", { threadId: "t1", strategy: null, autoStash: null })) as JobStart;
+    expect(start).toMatchObject({ ok: true, jobId: "job-pull", kind: "pull" });
+    expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(0);
+    await harness.behavior.experimental_emitHostSignal("h1", "jobEvent", { jobId: "job-pull", repoRoot: "/repo", event: { kind: "output", line: "Updating a..b" } });
+    expect(harness.realtimeSignals).toContainEqual({
+      channel: "job",
+      payload: { environmentId: "env1", hostId: "h1", jobId: "job-pull", event: { kind: "output", line: "Updating a..b" } },
+    });
+    expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(0);
+    const finished = { kind: "finished", result: { ok: true, message: "Update Project: Fast-forward.", overview: overview() } };
+    await harness.behavior.experimental_emitHostSignal("h1", "jobEvent", { jobId: "job-pull", repoRoot: "/repo", event: finished });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { environmentId: "env1", reason: "pull" } });
+    expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(1);
+    // A failed job publishes a change without nudging.
+    await harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null });
+    await harness.behavior.experimental_emitHostSignal("h1", "jobEvent", { jobId: "job-fetch", repoRoot: "/repo", event: { kind: "finished", result: { ok: false, error: { code: "network", message: "Fetch failed." }, overview: null } } });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { environmentId: "env1", reason: "fetch:failed" } });
+    expect(harness.inspection.sdk.callsTo("environments.status")).toHaveLength(1);
+    // A job this server did not start still reaches the environments it has seen for that repository.
+    await harness.behavior.callRpc("overview", { threadId: "t1" });
+    await harness.behavior.experimental_emitHostSignal("h1", "jobEvent", { jobId: "elsewhere", repoRoot: "/repo", event: { kind: "started", command: "git push" } });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "job", payload: { environmentId: "env1", hostId: "h1", jobId: "elsewhere", event: { kind: "started", command: "git push" } } });
+  });
+
+  it("maps the host's watch signal to the environments that use the repository", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    await harness.behavior.experimental_emitHostSignal("h1", "changed", { repoRoot: "/repo", reason: "watch" });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { hostId: "h1", reason: "watch" } });
+    await harness.behavior.callRpc("overview", { threadId: "t1" });
+    await harness.behavior.experimental_emitHostSignal("h1", "changed", { repoRoot: "/repo", reason: "watch" });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { environmentId: "env1", reason: "watch" } });
+    await harness.behavior.experimental_emitHostSignal("h2", "changed", { repoRoot: "/repo", reason: "watch" });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { hostId: "h2", reason: "watch" } });
+  });
+
+  it("forwards job polling and cancellation and the read methods", async () => {
+    const { bb, harness, hostCalls } = setup();
+    await plugin(bb);
+    expect(await harness.behavior.callRpc("jobGet", { threadId: "t1", jobId: "j1" })).toBeNull();
+    expect(await harness.behavior.callRpc("jobCancel", { threadId: "t1", jobId: "j1" })).toEqual({ cancelled: true });
+    expect(await harness.behavior.callRpc("compare", { threadId: "t1", base: { kind: "local", name: "main" }, target: { kind: "local", name: "feature" } })).toMatchObject({ ok: true, aheadCount: 0 });
+    expect(hostCalls.map((call) => [call.method, call.input])).toEqual([
+      ["jobGet", { repoPath: "/repo", jobId: "j1" }],
+      ["jobCancel", { repoPath: "/repo", jobId: "j1" }],
+      ["compare", { repoPath: "/repo", base: { kind: "local", name: "main" }, target: { kind: "local", name: "feature" } }],
+    ]);
+    const broken = setup({
+      hostResult: () => {
+        throw new Error("host h1 is offline");
+      },
+    });
+    await plugin(broken.bb);
+    expect(await broken.harness.behavior.callRpc("listTags", { threadId: "t1" })).toMatchObject({ ok: false, error: { code: "git_failed" } });
+    const unavailable = setup({ environment: null });
+    await plugin(unavailable.bb);
+    expect(await unavailable.harness.behavior.callRpc("jobGet", { threadId: "t1", jobId: "j1" })).toBeNull();
+    expect(await unavailable.harness.behavior.callRpc("fetch", { threadId: "t1", remote: null, prune: null })).toMatchObject({ ok: false, error: { code: "not_a_repo" } });
+  });
+
+  it("keeps favourites per host and repository in kv and tells other panes", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    expect(await harness.behavior.callRpc("favourites", { threadId: "t1" })).toEqual({ names: [] });
+    await harness.behavior.callRpc("overview", { threadId: "t1" });
+    expect(await harness.behavior.callRpc("setFavourite", { threadId: "t1", name: "local:feature", favourite: true })).toEqual({ names: ["local:feature"] });
+    expect(await harness.behavior.callRpc("setFavourite", { threadId: "t1", name: "remote:origin/main", favourite: true })).toEqual({ names: ["local:feature", "remote:origin/main"] });
+    expect(await harness.behavior.callRpc("setFavourite", { threadId: "t1", name: "local:feature", favourite: true })).toEqual({ names: ["local:feature", "remote:origin/main"] });
+    expect(await bb.storage.kv.get("fav:h1:/repo")).toEqual(["local:feature", "remote:origin/main"]);
+    expect(await harness.behavior.callRpc("setFavourite", { threadId: "t1", name: "local:feature", favourite: false })).toEqual({ names: ["remote:origin/main"] });
+    expect(await harness.behavior.callRpc("favourites", { threadId: "t1" })).toEqual({ names: ["remote:origin/main"] });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { environmentId: "env1", reason: "favourites" } });
+  });
+
+  it("fails the jobs it started when the host worker exits", async () => {
+    const { bb, harness } = setup();
+    await plugin(bb);
+    await harness.behavior.callRpc("push", { threadId: "t1", remote: null, setUpstream: true, expectedBranch: "main" });
+    await harness.behavior.experimental_emitHostWorkerExit("h1");
+    expect(harness.realtimeSignals.at(-2)).toMatchObject({
+      channel: "job",
+      payload: { environmentId: "env1", jobId: "job-push", event: { kind: "finished", result: { ok: false, error: { code: "git_failed" } } } },
+    });
+    expect(harness.realtimeSignals.at(-1)).toEqual({ channel: "changed", payload: { hostId: "h1", reason: "worker-exit" } });
   });
 
   it("disposes timers and the subscription cleanly", async () => {

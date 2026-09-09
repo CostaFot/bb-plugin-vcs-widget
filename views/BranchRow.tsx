@@ -1,20 +1,27 @@
 import { Fragment, type MouseEvent } from "react";
-import type { LocalBranch, Overview, RemoteBranch } from "../contracts";
-import { menuFor, type BranchMenuItemId } from "../shared/model";
+import type { LocalBranch, Overview } from "../contracts";
+import { entryKey, menuFor, type BranchEntry, type BranchMenuItemId, type TrackedOption } from "../shared/model";
 import { CommandItem } from "@/components/ui/command";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
-export type BranchEntry =
-  | { kind: "local"; branch: LocalBranch }
-  | { kind: "remote"; branch: RemoteBranch };
+export type { BranchEntry } from "../shared/model";
+
+/** Extra data a menu row carries: the chosen upstream of the Tracked Branch submenu. */
+export interface MenuExtra {
+  upstream?: TrackedOption["upstream"];
+}
 
 interface BranchRowProps {
   entry: BranchEntry;
@@ -22,8 +29,9 @@ interface BranchRowProps {
   /** cmdk value; unique per row. */
   value: string;
   disabled: boolean;
+  favourite: boolean;
   onSelect: (entry: BranchEntry) => void;
-  onMenu: (itemId: BranchMenuItemId, entry: BranchEntry) => void;
+  onMenu: (itemId: BranchMenuItemId, entry: BranchEntry, extra?: MenuExtra) => void;
 }
 
 /** Opens the row's context menu from the "..." button (keyboard and touch path). */
@@ -43,8 +51,8 @@ function openMenuAt(event: MouseEvent<HTMLButtonElement>) {
   );
 }
 
-export function BranchRow({ entry, overview, value, disabled, onSelect, onMenu }: BranchRowProps) {
-  const items = menuFor(entry, overview);
+export function BranchRow({ entry, overview, value, disabled, favourite, onSelect, onMenu }: BranchRowProps) {
+  const items = menuFor(entry, overview, { favourite });
   const isCurrent = entry.kind === "local" && entry.branch.isCurrent;
   const name = entry.branch.name;
   return (
@@ -57,6 +65,7 @@ export function BranchRow({ entry, overview, value, disabled, onSelect, onMenu }
           className="group gap-2 pr-1"
           data-branch-kind={entry.kind}
           data-branch-name={name}
+          data-favourite={favourite ? "true" : undefined}
         >
           <Icon
             name={entry.kind === "local" ? "GitBranch" : "Cloud"}
@@ -70,8 +79,25 @@ export function BranchRow({ entry, overview, value, disabled, onSelect, onMenu }
           ) : null}
           <button
             type="button"
+            aria-label={favourite ? `Remove ${name} from favourites` : `Add ${name} to favourites`}
+            aria-pressed={favourite}
+            className={cn(
+              "ml-1 rounded p-0.5 transition-opacity hover:bg-accent focus-visible:opacity-100 group-hover:opacity-100 group-data-[selected=true]:opacity-100",
+              favourite ? "text-foreground opacity-100" : "text-muted-foreground opacity-0",
+            )}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onMenu("favourite", entry);
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <Icon name="Star" className={cn("size-3.5", favourite && "fill-current")} />
+          </button>
+          <button
+            type="button"
             aria-label={`Actions for ${name}`}
-            className="ml-1 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-data-[selected=true]:opacity-100"
+            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-data-[selected=true]:opacity-100"
             onClick={openMenuAt}
             onPointerDown={(event) => event.stopPropagation()}
           >
@@ -79,17 +105,39 @@ export function BranchRow({ entry, overview, value, disabled, onSelect, onMenu }
           </button>
         </CommandItem>
       </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-56">
-        {items.map((item, index) => (
+      <ContextMenuContent className="min-w-64" data-testid="vcs-branch-menu" data-branch-key={entryKey(entry)}>
+        {items.map((item) => (
           <Fragment key={item.id}>
-            {item.id === "copy-name" && index > 0 ? <ContextMenuSeparator /> : null}
-            <ContextMenuItem
-              disabled={item.disabled}
-              title={item.reason ?? undefined}
-              onSelect={() => onMenu(item.id, entry)}
-            >
-              {item.label}
-            </ContextMenuItem>
+            {item.separatorBefore ? <ContextMenuSeparator /> : null}
+            {item.id === "tracked-branch" ? (
+              <ContextMenuSub>
+                <ContextMenuSubTrigger disabled={item.disabled} title={item.reason ?? undefined}>
+                  {item.label}
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="min-w-48">
+                  {(item.children ?? []).map((option) => (
+                    <ContextMenuItem
+                      key={option.label}
+                      onSelect={() => onMenu("tracked-branch", entry, { upstream: option.upstream })}
+                      data-upstream={option.label}
+                    >
+                      <span className="flex-1">{option.label}</span>
+                      {option.checked ? <Icon name="Check" className="size-3.5" aria-label="Tracked" /> : null}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            ) : (
+              <ContextMenuItem
+                disabled={item.disabled}
+                title={item.reason ?? undefined}
+                onSelect={() => onMenu(item.id, entry)}
+                data-menu-id={item.id}
+              >
+                {item.label}
+                {item.hint ? <ContextMenuShortcut>{item.hint}</ContextMenuShortcut> : null}
+              </ContextMenuItem>
+            )}
           </Fragment>
         ))}
       </ContextMenuContent>

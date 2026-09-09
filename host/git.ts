@@ -15,6 +15,8 @@ export interface GitRunOptions {
   timeoutMs: number;
   signal?: AbortSignal;
   env?: Record<string, string>;
+  /** Receives every stdout and stderr chunk as it arrives (jobs stream progress). */
+  onOutput?: (chunk: string) => void;
 }
 
 export interface GitRunResult {
@@ -113,6 +115,13 @@ export function runGit(args: readonly string[], options: GitRunOptions): Promise
         return;
       }
       chunks.push(chunk);
+      if (options.onOutput) {
+        try {
+          options.onOutput(chunk.toString("utf8"));
+        } catch {
+          // A listener must not break the run.
+        }
+      }
     };
     child.stdout?.on("data", collect(stdout));
     child.stderr?.on("data", collect(stderr));

@@ -14,6 +14,7 @@ import {
   splitRemoteRef,
 } from "../shared/parse";
 import { gitReadOrNull, runGit } from "./git";
+import { activeJobFor } from "./jobs";
 
 export interface RepoInfo {
   /** The worktree root (`--show-toplevel`). */
@@ -254,6 +255,7 @@ export async function readOverview(
     }),
     remotes,
     truncated: { local: headRows.length >= LOCAL_LIMIT, remote: remoteRows.length >= REMOTE_LIMIT },
+    activeJob: activeJobFor(repo.commonDir),
   };
 }
 

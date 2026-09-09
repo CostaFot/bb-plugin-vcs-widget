@@ -4,23 +4,31 @@ header.
 ## What you get
 
 - A **branch button** in every thread header showing the current branch.
-- A **searchable popup** with Recent, Local and Remote branches, ahead/behind
-  and gone badges, and the quick actions Update Project, Fetch, Push and New
-  Branch.
-- **Checkout, New Branch, Update Project and Push** that run on the machine
-  owning the thread's worktree, so remote environments work too.
-- **Command palette rows** for the same actions on thread routes.
+- A **searchable popup** with Favorites, Recent, Local and Remote branches,
+  ahead/behind, gone and worktree badges, and the quick actions Update
+  Project, Fetch, Push, New Branch and Checkout Tag or Revision.
+- The **full per-branch context menu**: Checkout, New Branch from, Checkout
+  and Rebase onto the current branch, Checkout and Update, Compare with,
+  Show Diff with Working Tree, Rebase, Merge, New Worktree from, Update,
+  Push, Tracked Branch, Rename, Delete, favourites, copy.
+- **Background fetch, pull and push** with progress and Cancel, so a slow
+  remote never hits bb's host-call deadline.
+- **Side panel tabs** that compare two branches or diff the working tree
+  against a branch, rendered with bb's own diff viewer.
+- **Command palette rows** for the quick actions on thread routes.
 - **Live refresh**: bb's sidebar follows a checkout, open popups refetch
-  after actions, and checkouts made by an agent or a terminal reach the
-  popup.
+  after actions, and changes made by an agent or a terminal reach the popup
+  through bb's environment events and the host's own file watch.
 
 ## How it works
 
-Git runs only as an argv on the plugin's host worker, never through a shell.
-Every push shows the exact command first and pushes exactly that or refuses
-with a typed reason. Nothing runs while the index is locked or a merge or
-rebase is in progress. Actions finish inside bb's host-call deadline or
-report a typed timeout, leaving no orphaned git processes behind.
+Git runs only as an argv on the plugin's host worker on the machine that
+owns the worktree, never through a shell. Every push, merge, rebase, delete,
+worktree and detached checkout shows the exact command first and runs
+exactly that or refuses with a typed reason; force push exists only as
+`--force-with-lease` against the sha the dialog showed. Nothing mutates
+while the index is locked or a merge or rebase is in progress; the popup
+offers Abort instead.
 
 ## For agents
 

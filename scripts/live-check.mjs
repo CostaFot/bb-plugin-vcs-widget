@@ -5,22 +5,10 @@
 //   VCS_E2E_THREAD=thr_x VCS_E2E_PROJECT=proj_x node scripts/live-check.mjs run <repo>
 //
 // See docs/VERIFY.md for the scenario list. Needs system Chromium
-// (CHROMIUM, default /usr/bin/chromium) and bb at BB_SERVER_URL.
-import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-
-/** puppeteer-core from the working directory's node_modules (not a dependency of the plugin). */
-async function loadPuppeteer() {
-  try {
-    return (await import("puppeteer-core")).default;
-  } catch {
-    const require = createRequire(pathToFileURL(join(process.cwd(), "package.json")));
-    return (await import(pathToFileURL(require.resolve("puppeteer-core")).href)).default;
-  }
-}
+// (CHROMIUM, default /usr/bin/chromium) and bb at BB_SERVER_URL. Milestone 2
+// scenarios live in live-check-m2.mjs; both share live-lib.mjs.
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { GIT_ID, browserHelpers, recorder, sh, sleep } from "./live-lib.mjs";
 
 const [, , mode, repoArg] = process.argv;
 if (!mode || !repoArg) {
@@ -30,14 +18,6 @@ if (!mode || !repoArg) {
 const REPO = repoArg;
 const BARE = `${REPO}.git`;
 const CLONE2 = `${REPO}-clone2`;
-const sh = (cmd) => {
-  try {
-    return execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  } catch (error) {
-    return `ERR(${error.status}): ${(error.stderr || "").trim()}`;
-  }
-};
-const GIT_ID = "-c user.name=vcs -c user.email=vcs@example.com";
 
 if (mode === "setup") {
   const cmds = [
@@ -63,109 +43,13 @@ if (mode === "setup") {
   process.exit(0);
 }
 
-const THREAD = process.env.VCS_E2E_THREAD;
-const PROJECT = process.env.VCS_E2E_PROJECT;
-const BASE = process.env.BB_SERVER_URL ?? "http://127.0.0.1:38886";
-const CHROMIUM = process.env.CHROMIUM ?? "/usr/bin/chromium";
-if (!THREAD || !PROJECT) {
-  console.error("set VCS_E2E_THREAD and VCS_E2E_PROJECT");
-  process.exit(2);
-}
-const puppeteer = await loadPuppeteer().catch(() => {
-  console.error("puppeteer-core not found: run `npm install --no-save puppeteer-core` in the plugin directory first");
-  process.exit(2);
-});
-mkdirSync("/tmp/vcs-e2e", { recursive: true });
-
+const H = await browserHelpers();
+const { THREAD, launch, label, waitLabel, openPopup, popupText, statusText, closePopup, waitStatus, waitToast, dialogCmd, dialogText, dialogButton, palette, paletteRows, clickPaletteRow, shot } = H;
+const { results, step, summary } = recorder();
 const TS = Date.now().toString(36);
 const LIVE = `feat/live-${TS}`;
 const NOCO = `feat/nocheckout-${TS}`;
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const results = [];
-const step = (name, pass, detail = "") => {
-  results.push({ name, pass });
-  console.log(`${pass ? "PASS" : "FAIL"} ${name}${detail ? `: ${detail}` : ""}`);
-};
-async function launch(tag, width = 1400) {
-  const browser = await puppeteer.launch({
-    executablePath: CHROMIUM,
-    headless: true,
-    protocolTimeout: 90_000,
-    args: ["--no-sandbox", "--disable-gpu", `--window-size=${width},900`, `--user-data-dir=/tmp/vcs-e2e/profile-${tag}`],
-  });
-  const page = await browser.newPage();
-  await page.setViewport({ width, height: 900 });
-  page.on("pageerror", (error) => console.log(`[${tag} pageerror]`, String(error).slice(0, 300)));
-  await page.goto(`${BASE}/projects/${PROJECT}/threads/${THREAD}`, { waitUntil: "load", timeout: 60_000 });
-  await page.waitForSelector('[data-testid="vcs-branch-button"]', { timeout: 30_000 });
-  await sleep(1500);
-  return { browser, page };
-}
-const label = (page) => page.$eval('[data-testid="vcs-branch-button"]', (e) => e.textContent.trim());
-async function waitLabel(page, want, ms = 15_000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    if ((await label(page)) === want) return true;
-    await sleep(300);
-  }
-  return false;
-}
-async function openPopup(page) {
-  if (await page.$('[data-testid="vcs-branch-popup"]')) return;
-  await page.click('[data-testid="vcs-branch-button"]');
-  await page.waitForSelector('[data-testid="vcs-branch-popup"]', { timeout: 15_000 });
-  await sleep(1500);
-}
-const popupText = async (page) => (await page.$eval('[data-testid="vcs-branch-popup"]', (e) => e.innerText).catch(() => "")).replace(/\n+/g, " | ");
-const statusText = async (page) => (await page.$eval('[data-testid="vcs-branch-popup"] [role="status"]', (e) => e.innerText).catch(() => "")).replace(/\n+/g, " | ");
-async function closePopup(page) {
-  for (let i = 0; i < 3 && (await page.$('[data-testid="vcs-branch-popup"]')); i += 1) {
-    await page.keyboard.press("Escape");
-    await sleep(500);
-  }
-}
-async function waitStatus(page, re, ms = 25_000) {
-  const t0 = Date.now();
-  let last = "";
-  while (Date.now() - t0 < ms) {
-    last = await statusText(page);
-    if (re.test(last)) return last;
-    await sleep(300);
-  }
-  return `TIMEOUT last="${last}"`;
-}
-async function dialogCmd(page) {
-  const el = await page.waitForSelector('[data-testid="vcs-command-preview"]', { timeout: 10_000 }).catch(() => null);
-  return el ? await el.evaluate((e) => e.textContent) : null;
-}
-const dialogText = async (page) => (await page.$eval('[role="alertdialog"]', (e) => e.innerText).catch(() => "")).replace(/\n+/g, " | ");
-async function dialogButton(page, text) {
-  for (const button of await page.$$('[role="alertdialog"] button')) {
-    if ((await button.evaluate((e) => e.textContent.trim())) === text) {
-      await button.click();
-      return true;
-    }
-  }
-  return false;
-}
-async function palette(page, query) {
-  await page.keyboard.down("Control");
-  await page.keyboard.down("Shift");
-  await page.keyboard.press("KeyP");
-  await page.keyboard.up("Shift");
-  await page.keyboard.up("Control");
-  await sleep(900);
-  await page.keyboard.type(query);
-  await sleep(800);
-}
-const paletteRows = (page) =>
-  page.evaluate(() => [...document.querySelectorAll('[cmdk-item], [role="option"]')].map((e) => e.innerText.replace(/\n+/g, " ")).filter((t) => /VCS Group:/.test(t)));
-async function clickPaletteRow(page, source) {
-  const handle = await page.evaluateHandle((src) => [...document.querySelectorAll('[cmdk-item], [role="option"]')].find((e) => new RegExp(src).test(e.innerText)), source);
-  if (handle && handle.asElement()) await handle.asElement().click();
-}
 const current = () => sh(`git -C ${REPO} branch --show-current`);
-const shot = (page, name) => page.screenshot({ path: `/tmp/vcs-e2e/${name}.png` }).catch(() => {});
 const lock = `${REPO}/.git/index.lock`;
 
 sh(`git -C ${REPO} switch -q main`);
@@ -268,8 +152,9 @@ try {
     await openPopup(page);
     const banner7 = await statusText(page);
     await page.click('[data-branch-name="main"]');
-    const st7 = await waitStatus(page, /locked/i, 10_000);
-    step("S7a index.lock -> banner on open + index_locked", /lock/i.test(banner7) && /locked/i.test(st7) && current() === LIVE, `banner="${banner7}"`);
+    // The row explains client-side (toast) while the overview reports a lock; nothing reaches git.
+    const st7 = await waitToast(page, /index lock/i, 10_000);
+    step("S7a index.lock -> banner on open + click refused", /lock/i.test(banner7) && /index lock/i.test(st7) && current() === LIVE, `banner="${banner7}" toast="${st7}"`);
   } finally {
     if (existsSync(lock)) unlinkSync(lock);
   }
@@ -299,7 +184,7 @@ try {
 
   await palette(page, "VCS Group");
   const rows10 = await paletteRows(page);
-  step("S10a five palette rows", rows10.length === 5, JSON.stringify(rows10));
+  step("S10a six palette rows", rows10.length === 6, JSON.stringify(rows10));
   await clickPaletteRow(page, "Open branches");
   await sleep(1500);
   step("S10b palette opens popup", !!(await page.$('[data-testid="vcs-branch-popup"]')));
@@ -347,6 +232,5 @@ if (existsSync(lock)) unlinkSync(lock);
 sh(`git -C ${REPO} switch -q main`);
 sh(`git -C ${REPO} branch -D ${LIVE} ${NOCO} feat/click-test`);
 sh(`git -C ${CLONE2} pull -q`);
-console.log("=====SUMMARY=====");
-for (const result of results) console.log(`${result.pass ? "PASS" : "FAIL"} ${result.name}`);
-process.exit(results.every((result) => result.pass) ? 0 : 1);
+void results;
+process.exit(summary() ? 0 : 1);
