@@ -30,6 +30,12 @@ comments (`claude: step N done, <what>`), never in files here.
 - COS-144 hand-check those two buttons: the Sent glyph, the tooltip, and the
   push wording end to end (the live check reads that button, never clicks it)
   — done 2026-09-09, all three pass
+- COS-145 README pass: requirements and a real install line, the argv tables
+  split into `docs/COMMANDS.md`, the favourites spelling settled British
+  across the popup and its menu, LICENSE and the listing metadata —
+  shipped 2026-09-09
+- COS-146 Costa reads `README.md` and `PLUGIN_OVERVIEW.md` himself, rendered,
+  before the plugin goes public — open, and COS-130 waits behind it
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
@@ -156,6 +162,21 @@ Styling is Tailwind against host theme tokens only.
   local-auth API and reachable by any local process with a thread id; the
   plugin cannot enforce more than logging each mutation with its thread id
   (README, "Safety model").
+- `docs/COMMANDS.md` tables every argv the branch menu, the log panel and the
+  commit panel run; the README keeps the push, under "How push decides",
+  because that one is behaviour. Changing a command means changing the table.
+  Being able to read them is why someone installs this rather than a wrapper
+  that hides them, so a stale table costs more than no table.
+- `README.md` and `PLUGIN_OVERVIEW.md` are the two files a human reads, and
+  Costa's `costa-writing-style` skill governs both. The overview is not a
+  short README and must never point at one: the marketplace copies it verbatim
+  as the listing's overview file, so it stands alone. Keep the two in
+  agreement, and in agreement with what the UI actually says — the popup once
+  headed a group "Favorites" while the settings section said "Favourite
+  branches", and the README faithfully reproduced both.
+- The README's "Safety model" heading is load-bearing: `CHANGELOG.md`,
+  this file, `server.ts` and `views/SettingsSections.tsx` all name it, the
+  last of those in text the user reads. Renaming it means renaming those.
 
 ## References
 
