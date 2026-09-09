@@ -108,7 +108,7 @@ export default async function plugin(bb: BbPluginApi) {
     jobTimeoutSeconds: {
       type: "number",
       label: "Network operation timeout (seconds)",
-      description: "Fetch, pull and push run in the background on the host and are stopped after this long.",
+      description: "Fetch, pull, push and commit run in the background on the host and are stopped after this long.",
       default: JOB_TIMEOUT_SECONDS.default,
     },
   });

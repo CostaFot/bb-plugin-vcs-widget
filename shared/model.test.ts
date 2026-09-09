@@ -250,7 +250,7 @@ describe("menuFor", () => {
       "Merge 'origin/feature' into 'main'",
       "New Worktree from 'origin/feature'...",
       "Delete",
-      "Add to Favorites",
+      "Add to Favourites",
       "Copy Branch Name",
     ]);
   });
@@ -282,7 +282,7 @@ describe("menuFor", () => {
     expect(byId.get("update")?.reason).toBe("No upstream branch.");
     expect(byId.get("push")?.disabled).toBe(false);
     expect(byId.get("rename")?.hint).toBe("F2");
-    expect(byId.get("favourite")?.label).toBe("Remove from Favorites");
+    expect(byId.get("favourite")?.label).toBe("Remove from Favourites");
     expect(byId.get("compare")?.separatorBefore).toBe(true);
     expect(byId.get("tracked-branch")?.children?.map((child) => [child.label, child.checked])).toEqual([
       ["origin/feature", false],

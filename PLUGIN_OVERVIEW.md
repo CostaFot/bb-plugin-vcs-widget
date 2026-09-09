@@ -4,7 +4,7 @@ Studio, in bb's thread header.
 ## What you get
 
 - A **branch button** in every thread header showing the current branch.
-- A **searchable popup** with Favorites, Recent, Local and Remote branches,
+- A **searchable popup** with Favourites, Recent, Local and Remote branches,
   ahead/behind, gone and worktree badges, and the quick actions Update
   Project, Commit, Show Git Log, Fetch, Push, New Branch and Checkout Tag or
   Revision.
@@ -16,8 +16,11 @@ Studio, in bb's thread header.
   remote never hits bb's host-call deadline.
 - **A commit dialog** as a panel tab: the working tree as a checklist whose
   checkbox is the staged state, a diff preview with expand-context, message,
-  Amend, Sign-off, Run Git hooks, Commit and Commit and Push, and a
-  per-file Discard that always asks first.
+  Amend, Sign-off, Run Git hooks, Commit and Commit and Push, and a Discard
+  that always asks first, on a file or on a whole group.
+- **Agent Commit** and **Agent Commit & Push**, which run no git: they hand
+  the commit to the agent in the thread, so the agent that wrote the code
+  writes the message.
 - **A git log** as a panel tab: virtualised rows with the refs each commit
   carries as badges, a branch and a message filter, a details drawer with
   the files a commit changed and their diffs, and a context menu with

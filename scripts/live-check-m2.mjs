@@ -52,10 +52,10 @@ try {
   await H.closePopup(page);
   await H.openPopup(page);
   const t2b = await H.popupText(page);
-  step("M2-2 star adds a Favorites group that survives reopen", /Favorites \| feature/.test(t2) && /Favorites \| feature/.test(t2b), t2.slice(0, 120));
+  step("M2-2 star adds a Favourites group that survives reopen", /Favourites \| feature/.test(t2) && /Favourites \| feature/.test(t2b), t2.slice(0, 120));
   await page.click('[data-branch-name="feature"] [aria-label="Remove feature from favourites"]');
   await sleep(1000);
-  step("M2-2b unstar removes the group", !/Favorites/.test(await H.popupText(page)));
+  step("M2-2b unstar removes the group", !/Favourites/.test(await H.popupText(page)));
 
   // M2-3 rename
   await H.openMenu(page, "feature");

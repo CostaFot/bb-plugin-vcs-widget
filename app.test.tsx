@@ -502,7 +502,7 @@ describe("context menu", () => {
       "Tracked Branch",
       "Rename...",
       "Delete",
-      "Add to Favorites",
+      "Add to Favourites",
       "Copy Branch Name",
     ]);
     await user.click(within(menu).getByText("Compare with 'main'"));
@@ -591,19 +591,19 @@ describe("context menu", () => {
     expect(slot.inspection.rpcCalls.at(-1)).toEqual({ method: "deleteBranch", input: { threadId: "t1", name: "feature", force: true } });
   });
 
-  it("stars a branch into the Favorites group", async () => {
+  it("stars a branch into the Favourites group", async () => {
     const user = userEvent.setup();
     const slot = render();
     await user.click(slot.getByTestId("vcs-branch-button"));
     const popup = await screen.findByTestId("vcs-branch-popup");
     await within(popup).findAllByText("feature");
-    expect(within(popup).queryByText("Favorites")).toBeNull();
+    expect(within(popup).queryByText("Favourites")).toBeNull();
     await user.click(within(popup).getAllByLabelText("Add feature to favourites")[0]!);
     await waitFor(() => expect(slot.inspection.rpcCalls.at(-1)).toEqual({ method: "setFavourite", input: { threadId: "t1", name: "local:feature", favourite: true } }));
-    await within(popup).findByText("Favorites");
+    await within(popup).findByText("Favourites");
     expect(within(popup).getAllByText("feature").length).toBe(3);
     const menu = await openMenu(popup, "feature");
-    expect(within(menu).getByText("Remove from Favorites")).toBeTruthy();
+    expect(within(menu).getByText("Remove from Favourites")).toBeTruthy();
   });
 });
 

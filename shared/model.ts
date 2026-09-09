@@ -656,7 +656,7 @@ export function labelFor(id: BranchMenuItemId, branchName: string, current: stri
     case "delete":
       return "Delete";
     case "favourite":
-      return favourite ? "Remove from Favorites" : "Add to Favorites";
+      return favourite ? "Remove from Favourites" : "Add to Favourites";
     case "copy-name":
       return "Copy Branch Name";
   }

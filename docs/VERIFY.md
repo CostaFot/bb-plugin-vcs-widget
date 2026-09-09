@@ -102,7 +102,7 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
 
 1. Right-click `feature`: the sixteen IntelliJ rows in order, Rename with
    the F2 hint, Tracked Branch as a submenu.
-2. The star on a row adds a Favorites group above Recent; it survives a
+2. The star on a row adds a Favourites group above Recent; it survives a
    reopen (server kv); unstarring removes the group.
 3. Rename... opens the inline step prefilled; Enter renames.
 4. Delete on an unmerged branch: dialog `git branch -d`, then a destructive

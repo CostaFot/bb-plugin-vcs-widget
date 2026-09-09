@@ -2,7 +2,8 @@
 
 ## 0.6.0 (2026-09-09)
 
-Three things the commit panel was missing.
+Three things the commit panel was missing, and a pass over the paperwork
+before the plugin goes anywhere near a marketplace.
 
 - Right-click a file row for Copy Path and Discard. Copy Path copies the
   repository-relative path the row shows (a rename copies the new one);
@@ -13,13 +14,22 @@ Three things the commit panel was missing.
   category, one call. Conflicts has no button, because a conflicted file
   cannot be discarded. A group whose paths would outgrow one call is refused
   before the dialog, with the reason, rather than failing validation.
-- "LGTM - Commit" next to Commit and Commit and Push: it sends that text to
-  the agent in this thread as if you had typed it, and the agent writes the
-  message and commits. Always enabled — whatever is staged, whatever the
-  agent is doing. A click during a running turn queues behind it
-  (`queue-if-active`) and the panel says so. It is the only RPC method in
-  the plugin that runs no git; it is logged with its thread id like every
-  mutation (README, "Safety model").
+- "Agent Commit" and "Agent Commit & Push" next to Commit and Commit and
+  Push: they hand the job to the agent in this thread instead of running git.
+  Each sends one fixed line ("LGTM - Commit", "LGTM - Commit & Push") to the
+  thread as if you had typed it, so the agent that wrote the code writes the
+  message and commits. They carry a paper plane, because a button that sends
+  a message should not look like a button that runs git, and they stay
+  enabled whatever is staged and whatever the agent is doing. A click during
+  a running turn queues behind it (`queue-if-active`) and the panel says so.
+  They are the plugin's only RPC method that runs no git: the caller names a
+  variant, never the text, so the two lines in `AGENT_ACTIONS` are the whole
+  of what the plugin can say to an agent, and the call is logged with its
+  thread id like every mutation (README, "Safety model").
+- The popup's branch group and its context menu said "Favorites" while the
+  settings section said "Favourite branches". Both are British now.
+- A LICENSE file for the MIT licence `package.json` always declared, and the
+  argv tables moved out of the README to `docs/COMMANDS.md`.
 
 ## 0.5.0 (2026-09-09) — milestone 5
 

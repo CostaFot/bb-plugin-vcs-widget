@@ -3,6 +3,24 @@
   "version": "0.6.0",
   "description": "IntelliJ-style Git branches popup, commit dialog and log for bb.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CostaFot/bb-plugin-vcs-widget.git"
+  },
+  "homepage": "https://github.com/CostaFot/bb-plugin-vcs-widget#readme",
+  "bugs": {
+    "url": "https://github.com/CostaFot/bb-plugin-vcs-widget/issues"
+  },
+  "keywords": [
+    "bb",
+    "bb-plugin",
+    "git",
+    "vcs",
+    "branches",
+    "commit",
+    "git-log",
+    "intellij"
+  ],
   "type": "module",
   "engines": {
     "bb": ">=0.42",
@@ -23,7 +41,9 @@
     "server": "./server.ts",
     "app": "./app.tsx",
     "host": "./host.ts",
-    "skills": ["skills"]
+    "skills": [
+      "skills"
+    ]
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.3",

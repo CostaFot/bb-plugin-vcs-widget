@@ -266,7 +266,7 @@ export function BranchPopup({
                 {overview && groups ? (
                   <>
                     {favouriteRows.length > 0 ? (
-                      <CommandGroup heading="Favorites">{favouriteRows.map((entry) => row(entry, "fav"))}</CommandGroup>
+                      <CommandGroup heading="Favourites">{favouriteRows.map((entry) => row(entry, "fav"))}</CommandGroup>
                     ) : null}
                     {recent.length > 0 ? (
                       <CommandGroup heading="Recent">
