@@ -2,11 +2,11 @@
 
 ![The branch popup, the commit panel and the git log under a bb thread header](docs/screenshots/hero.png)
 
-IntelliJ style Git branches popup, commit dialog and log, inside bb.
+The Git branches popup, commit dialog and log from IntelliJ, inside bb.
 
 ## Requirements
 
-- bb 0.42 or newer.
+- bb 0.42 or newer
 - git 2.24 or newer
 - npm
 
@@ -102,10 +102,10 @@ Under Settings → Installed plugins → VCS Widget:
 | Prune on fetch | on |
 | Network operation timeout | 600 s, after which a fetch, pull, push or commit job is stopped (commit is on that list because of hooks) |
 
-Below the form, "Agent access" repeats what the plugin exposes outside the UI,
-and "Favourite branches" lists every starred branch with the machine and
-worktree it belongs to, with a Clear button per repository. It is the only place
-that store is visible.
+Below the form, "Agent access" lists the reads an agent or a terminal can do,
+and "Favourite branches" every starred branch with the machine and worktree it
+belongs to, with a Clear button per repository. It is the only place that store
+is visible.
 
 ## From a terminal, or an agent
 
@@ -126,7 +126,19 @@ Agents get those same three reads as the `vcs_widget_status` tool, plus a
 bundled skill telling them the plugin cannot commit or push and that git changes
 are the human's to ask for.
 
-## Working on it
+## Safety model
+
+- Git only ever runs as `spawn("git", argv)` on the machine that owns the
+  worktree, never through a shell.
+- Everything destructive shows the exact command first, and the log's actions
+  name the sha the row showed rather than a name that may have moved since.
+- No agent tool or CLI can mutate the repository. The RPC route behind the popup
+  is a different matter, and worth reading before you install.
+
+[The safety model](docs/SAFETY.md) has all of that in full, and
+[how push decides](docs/PUSH.md) answers "will this force-push my branch".
+
+## Development
 
 ```sh
 npm install
@@ -137,58 +149,6 @@ bb plugin dev                # rebuild and reload on save
 ```
 
 `CLAUDE.md` has the architecture and `docs/VERIFY.md` the live click-throughs.
-
-## Safety model
-
-What it will and will not do to your repository.
-
-- Git only ever runs as `spawn("git", argv)` on the host worker, never through a
-  shell. Refs go after `--end-of-options`, paths after `--`, and a commit
-  message goes on git's stdin instead of becoming an argument.
-  [docs/COMMANDS.md](docs/COMMANDS.md) lists the exact argv behind every menu
-  row, log row and commit control, because being able to read them is the point.
-- Push, merge, rebase, delete, worktree, detached checkout, amend, cherry-pick,
-  revert, reset, and Update Project on a dirty tree all ask first and show the
-  command. Forced deletes, remote deletes, `reset --hard` and every discard are
-  destructive confirms.
-- Nothing mutates while `.git/index.lock` exists, a merge, rebase, cherry-pick
-  or revert is in progress, or a job holds the repository; the popup says which,
-  and offers Abort or Cancel. One mutation at a time per repository.
-- Network work runs as a job rather than inside a request, so a slow remote
-  cannot hit bb's call deadline. Anything that does time out is killed as a
-  process group, ssh and credential helpers included.
-- The log's actions name the sha the row showed, never a branch name that could
-  have moved since.
-- **No agent tool or CLI can mutate the repository.** `bb vcs-widget` and
-  `vcs_widget_status` reach exactly two of the host's reads, and there is no
-  argument that turns either into a write.
-- The RPC endpoints behind the popup are a different matter, and worth knowing
-  before you install. They are bb's local-auth API, like every other plugin's,
-  so any local process holding the browser's rights — an agent shell included —
-  can call them with a thread id, and a mutation on thread T runs on T's host.
-  The plugin cannot close that from inside; it logs every mutation and every job
-  with its thread id, so misuse is at least visible.
-- The two agent buttons send one of two fixed texts to the thread as an ordinary
-  user message, and the caller names a variant, never the text. It widens
-  nothing: whatever can call it can already send the thread any message it likes
-  through bb's own API.
-
-### How push decides
-
-The push dialog previews the exact command, and the host runs that or refuses
-with a typed error. Nothing depends on `push.default`, `remote.pushDefault` or
-`branch.*.pushRemote`:
-
-| Branch state | Command |
-|---|---|
-| tracks `<remote>/<branch>` on a configured remote | `git push --no-progress --end-of-options <remote> HEAD:refs/heads/<branch>` |
-| no upstream, upstream gone, or a local upstream | `git push --no-progress -u --end-of-options <default remote> HEAD` |
-| "Push..." on a branch that is not checked out | the same, with `refs/heads/<name>` in place of `HEAD` |
-| the dialog's "force with lease" switch | adds `--force-with-lease=refs/heads/<branch>:<remote sha the dialog saw>` |
-
-The request names the branch and the sha the dialog showed. If either moved in
-the meantime the host answers `head_changed` and pushes nothing. Plain `--force`
-does not exist here.
 
 ---
 

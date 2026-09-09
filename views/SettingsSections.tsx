@@ -36,7 +36,7 @@ export function AgentAccessSection() {
       <p className="text-xs text-muted-foreground">
         Checkout, commit, push and the rest stay with you, in the branch popup, the Commit panel and the Git Log, where
         each one shows the exact git command first. Every mutation the plugin runs is written to its log with the thread
-        that asked for it — see “Safety model” in the README for what that does and does not guarantee.
+        that asked for it — the plugin’s “Safety model” doc says what that does and does not guarantee.
       </p>
     </div>
   );

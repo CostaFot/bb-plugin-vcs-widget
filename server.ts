@@ -183,7 +183,7 @@ export default async function plugin(bb: BbPluginApi) {
   function logMutation(reason: string, threadId: string, target: RepositoryTarget): void {
     // Every mutation is visible in the plugin log with the thread that asked
     // for it: the RPC route is local-auth like all of bb's API, so this is the
-    // audit trail, not a guard (see README, "Safety model").
+    // audit trail, not a guard (see docs/SAFETY.md).
     bb.log.info(`${reason} requested for thread ${threadId} on ${target.hostId}:${target.repoPath}`);
   }
 
@@ -560,7 +560,7 @@ export default async function plugin(bb: BbPluginApi) {
   // -------------------------------------------------------------------------
   // Read-only surfaces: `bb vcs-widget` and one agent tool. Both go through
   // the same reader, which only ever calls the two reading host methods, so
-  // no argv and no model can reach a mutation (README, "Safety model").
+  // no argv and no model can reach a mutation (docs/SAFETY.md).
   // -------------------------------------------------------------------------
 
   const cliReader: CliReader = {

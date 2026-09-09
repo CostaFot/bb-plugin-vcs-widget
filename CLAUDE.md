@@ -166,10 +166,10 @@ Styling is Tailwind against host theme tokens only.
   path to the host and it knows two reads. The RPC route itself is bb's
   local-auth API and reachable by any local process with a thread id; the
   plugin cannot enforce more than logging each mutation with its thread id
-  (README, "Safety model").
+  (`docs/SAFETY.md`).
 - `docs/COMMANDS.md` tables every argv the branch menu, the log panel and the
-  commit panel run; the README keeps the push, under "How push decides",
-  because that one is behaviour. Changing a command means changing the table.
+  commit panel run; `docs/PUSH.md` holds the push, because that one is
+  behaviour rather than a list. Changing a command means changing the table.
   Being able to read them is why someone installs this rather than a wrapper
   that hides them, so a stale table costs more than no table.
 - `README.md` and `PLUGIN_OVERVIEW.md` are the two files a human reads, and
@@ -179,9 +179,10 @@ Styling is Tailwind against host theme tokens only.
   agreement, and in agreement with what the UI actually says — the popup once
   headed a group "Favorites" while the settings section said "Favourite
   branches", and the README faithfully reproduced both.
-- The README's "Safety model" heading is load-bearing: `CHANGELOG.md`,
-  this file, `server.ts` and `views/SettingsSections.tsx` all name it, the
-  last of those in text the user reads. Renaming it means renaming those.
+- `docs/SAFETY.md` ("Safety model") is load-bearing: `CHANGELOG.md`, this
+  file, `README.md`, `server.ts` and `views/SettingsSections.tsx` all name it,
+  the last of those in text the user reads. Moving or renaming it means
+  changing those. The README keeps a short version of it and links the file.
 
 ## References
 

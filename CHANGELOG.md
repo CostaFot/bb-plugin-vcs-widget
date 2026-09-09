@@ -25,11 +25,14 @@ before the plugin goes anywhere near a marketplace.
   They are the plugin's only RPC method that runs no git: the caller names a
   variant, never the text, so the two lines in `AGENT_ACTIONS` are the whole
   of what the plugin can say to an agent, and the call is logged with its
-  thread id like every mutation (README, "Safety model").
+  thread id like every mutation (`docs/SAFETY.md`).
 - The popup's branch group and its context menu said "Favorites" while the
   settings section said "Favourite branches". Both are British now.
-- A LICENSE file for the MIT licence `package.json` always declared, and the
-  argv tables moved out of the README to `docs/COMMANDS.md`.
+- A LICENSE file for the MIT licence `package.json` always declared, and
+  three things moved out of the README into `docs/`: the argv tables as
+  `COMMANDS.md`, the safety model as `SAFETY.md`, and how push decides as
+  `PUSH.md`. The README links all three and keeps three lines of the safety
+  model, since it is the part someone should read before installing.
 
 ## 0.5.0 (2026-09-09) — milestone 5
 

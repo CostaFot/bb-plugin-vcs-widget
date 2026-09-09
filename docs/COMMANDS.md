@@ -5,9 +5,8 @@ shell. Refs go after `--end-of-options`, paths after `--`, and a commit message
 goes on stdin. These tables are the whole of it, so you can read what a row
 will do before you click it.
 
-"How push decides" is in the [README](../README.md#how-push-decides) instead:
-that one is behaviour rather than a list, and it is the answer to "will this
-force-push my branch".
+The push is in [How push decides](PUSH.md) instead: that one is behaviour
+rather than a list, and it is the answer to "will this force-push my branch".
 
 ## The branch menu
 
@@ -50,7 +49,7 @@ one is a dialog this plugin does not have.
 | Tick a file (or a group) | `git --literal-pathspecs add -A -- <paths>` |
 | Untick a file (or a group) | `git --literal-pathspecs reset -q -- <paths>` (works before the first commit too) |
 | Commit | `git commit -F -` with the message on stdin; `--amend`, `--signoff`, `--no-verify` as ticked |
-| Commit and Push | the commit, then the push the README describes, on the overview the commit reported |
+| Commit and Push | the commit, then the push [PUSH.md](PUSH.md) describes, on the overview the commit reported |
 | Discard (paths in HEAD) | `git --literal-pathspecs restore --staged --worktree --source=HEAD -- <paths>` |
 | Discard (files new to git) | `git --literal-pathspecs rm -q --cached -- <paths>`; the file stays on disk as untracked |
 | Discard (untracked files) | `git --literal-pathspecs clean -f -- <paths>`; the file is deleted |
