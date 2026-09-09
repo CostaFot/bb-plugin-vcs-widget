@@ -75,12 +75,26 @@ export const DIFF_SIDES = ["index", "worktree"] as const;
 export type DiffSide = (typeof DIFF_SIDES)[number];
 
 /**
- * What the commit panel's "LGTM - Commit" button sends to the thread's agent,
- * as if the human had typed it. Fixed text: the button is the whole of what
- * the plugin can say, and a repository that needs other words is a setting
- * for later.
+ * The commit panel's two agent buttons: what each one says to the human and
+ * what it sends to the thread's agent, as if the human had typed it.
+ *
+ * The messages are fixed and the caller names a variant, never the text —
+ * these two lines are the whole of what the plugin can say to an agent, and
+ * a repository that needs other words is a setting for later. Label and
+ * message differ on purpose: the button is read beside "Commit" and
+ * "Commit and Push", where "Agent" is the word that separates them, while
+ * the message is read in the thread's transcript, where "LGTM - Commit"
+ * carries the human's verdict along with the instruction.
  */
-export const AGENT_COMMIT_MESSAGE = "LGTM - Commit";
+export const AGENT_ACTIONS = {
+  commit: { label: "Agent Commit", message: "LGTM - Commit" },
+  "commit-push": { label: "Agent Commit & Push", message: "LGTM - Commit & Push" },
+} as const;
+
+export type AgentActionVariant = keyof typeof AGENT_ACTIONS;
+
+/** The variants in button order, so the contract and the panel cannot drift. */
+export const AGENT_ACTION_VARIANTS = ["commit", "commit-push"] as const satisfies readonly AgentActionVariant[];
 
 /** `git switch` and `--end-of-options` arrived in 2.24. */
 export const MIN_GIT_VERSION = { major: 2, minor: 24 } as const;

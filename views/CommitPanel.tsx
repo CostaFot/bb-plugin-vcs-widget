@@ -13,7 +13,7 @@ import { useSidebarThread } from "../hooks/use-sidebar-thread";
 import { useVcsActions } from "../hooks/use-vcs-actions";
 import { errorMessage } from "../lib/errors";
 import type { rpcContract } from "../server";
-import { AGENT_COMMIT_MESSAGE, type DiffSide } from "../shared/constants";
+import { AGENT_ACTIONS, AGENT_ACTION_VARIANTS, type AgentActionVariant, type DiffSide } from "../shared/constants";
 import {
   commitBlockedReason,
   diffSidesFor,
@@ -344,31 +344,36 @@ export function CommitPanel({ threadId }: PanelProps) {
   /**
    * Hands the commit to the agent in this thread. Always available: the human
    * has read the diff here, and whether the agent is mid-turn is the server's
-   * problem (it queues).
+   * problem (it queues). The variant picks which of the two fixed messages
+   * goes; the panel never sends the text.
    */
-  const askAgent = useCallback(async () => {
-    setSending(true);
-    setNotice(null);
-    actions.clearStatus();
-    try {
-      const result = await rpc.call("sendToAgent", { threadId });
-      setNotice(
-        result.ok
-          ? {
-              kind: "ok",
-              text:
-                result.delivery === "queued"
-                  ? `“${AGENT_COMMIT_MESSAGE}” is queued; the agent commits when the current turn ends.`
-                  : `“${AGENT_COMMIT_MESSAGE}” sent to the agent.`,
-            }
-          : { kind: "error", text: result.error.message },
-      );
-    } catch (cause) {
-      setNotice({ kind: "error", text: errorMessage(cause) });
-    } finally {
-      setSending(false);
-    }
-  }, [actions, rpc, threadId]);
+  const askAgent = useCallback(
+    async (variant: AgentActionVariant) => {
+      const { message: sent } = AGENT_ACTIONS[variant];
+      setSending(true);
+      setNotice(null);
+      actions.clearStatus();
+      try {
+        const result = await rpc.call("sendToAgent", { threadId, variant });
+        setNotice(
+          result.ok
+            ? {
+                kind: "ok",
+                text:
+                  result.delivery === "queued"
+                    ? `“${sent}” is queued; the agent takes it when the current turn ends.`
+                    : `“${sent}” sent to the agent.`,
+              }
+            : { kind: "error", text: result.error.message },
+        );
+      } catch (cause) {
+        setNotice({ kind: "error", text: errorMessage(cause) });
+      } finally {
+        setSending(false);
+      }
+    },
+    [actions, rpc, threadId],
+  );
 
   const toggleAmend = (on: boolean) => {
     setAmend(on);
@@ -505,17 +510,32 @@ export function CommitPanel({ threadId }: PanelProps) {
           <Button type="button" size="sm" variant="outline" disabled={!canPush} onClick={() => submit(true)} data-testid="vcs-commit-push-button">
             {amend ? "Amend and Push" : "Commit and Push"}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            aria-label={`${AGENT_COMMIT_MESSAGE}: hand the commit to the agent in this thread`}
-            disabled={sending}
-            onClick={() => void askAgent()}
-            data-testid="vcs-agent-commit-button"
-          >
-            {AGENT_COMMIT_MESSAGE}
-          </Button>
+          {AGENT_ACTION_VARIANTS.map((variant) => {
+            const action = AGENT_ACTIONS[variant];
+            // Runs no git: it sends `action.message` to this thread as if the
+            // human had typed it. The Sent icon is the host's own glyph for a
+            // queued message, which is what `queue-if-active` makes this.
+            const explains = `Sends “${action.message}” to this thread's agent, as if you had typed it. Runs no git here.`;
+            // The title sits on a wrapper because the vendored Button drops
+            // `title` from its props; hovering the button still shows it, and
+            // a re-vendored Button cannot silently take it away again.
+            return (
+              <span key={variant} title={explains} className="inline-flex">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  aria-label={`${action.label}: ${explains}`}
+                  disabled={sending}
+                  onClick={() => void askAgent(variant)}
+                  data-testid={`vcs-agent-${variant}-button`}
+                >
+                  <Icon name="Sent" className="size-3.5" aria-hidden />
+                  {action.label}
+                </Button>
+              </span>
+            );
+          })}
           {progress !== null && busy ? (
             <Button type="button" size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => void jobs.cancel(progress.jobId)}>
               Cancel

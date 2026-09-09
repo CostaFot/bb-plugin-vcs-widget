@@ -262,9 +262,13 @@ Manual, on top of the script:
    "Discard changes in 2 files", one
    `git --literal-pathspecs restore --staged --worktree --source=HEAD --`
    naming both paths, and `git status --porcelain` is empty afterwards.
-7. "LGTM - Commit" is enabled with nothing staged and no message; clicking
-   it puts a User message reading "LGTM - Commit" in the thread's event log
-   (`bb thread log`), and the panel says it was sent or queued.
+7. Both agent buttons read "Agent Commit" and "Agent Commit & Push", carry
+   the Sent icon and are enabled with nothing staged and no message. Only the
+   first is clicked: it puts a User message reading "LGTM - Commit" in the
+   thread's event log (`bb thread log`), and the panel says it was sent or
+   queued. Clicking the second would tell a real agent to push, and the only
+   thing it would add is that the variant picks the other row of
+   `AGENT_ACTIONS`, which `server.test.ts` proves against that same table.
 
 Manual, on top of the script:
 
@@ -277,8 +281,14 @@ Manual, on top of the script:
 9. A group whose paths would outgrow one call (500 files, or long paths over
    256 KB of argv) is refused before the dialog with "Too many files for one
    discard."
-10. Clicking "LGTM - Commit" while the agent is mid-turn says the message is
+10. Clicking "Agent Commit" while the agent is mid-turn says the message is
     queued, and the agent takes it when the turn ends.
+11. "Agent Commit & Push" on a thread whose repository has an upstream and one
+    unpushed commit: the event log shows "LGTM - Commit & Push", the panel
+    quotes that text back, and the agent commits and pushes. This is the
+    scenario the script will not run for you.
+12. Hovering either agent button explains it: "Sends “LGTM - …” to this
+    thread's agent, as if you had typed it. Runs no git here."
 
 ## Last run
 

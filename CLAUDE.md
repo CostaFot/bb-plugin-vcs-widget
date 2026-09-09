@@ -67,8 +67,11 @@ app.tsx (browser) --useRpc(rpcContract, keyed by threadId)--> server.ts (bb serv
   through `favouriteRepos` / `clearFavourites`, which rebuild the key from
   `hostId` and `repoRoot` so a caller never names a storage key).
   `sendToAgent` is the one method that runs no git: it hands the commit to
-  the thread's agent through `bb.sdk.threads.send` (`queue-if-active`, the
-  text in `AGENT_COMMIT_MESSAGE`), and it is logged like a mutation.
+  the thread's agent through `bb.sdk.threads.send` (`queue-if-active`). Its
+  input names a variant, never the text; the label and message for each live
+  in `AGENT_ACTIONS` (`shared/constants.ts`) and the server does the lookup,
+  so the two lines there are the whole of what the plugin can say to an
+  agent. It is logged like a mutation.
 - `server/cli.ts` is the whole read-only surface: argv parsing, the text and
   `--json` shapes, and a `CliReader` with exactly two methods (overview,
   log). `bb.cli.register` and `bb.agents.registerTool("vcs_widget_status")`

@@ -10,6 +10,7 @@
 import { defineRpcContract, type ExperimentalHostSignals } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
+  AGENT_ACTION_VARIANTS,
   DIFF_SIDES,
   JOB_KINDS,
   LOG_MAX_SKIP,
@@ -748,12 +749,17 @@ export const rpcContract = defineRpcContract({
     output: jobStartSchema,
   },
   /**
-   * Hands the commit to the agent in this thread by sending it the fixed
-   * "LGTM - Commit" text as an ordinary user message. The one method here
-   * that runs no git.
+   * Hands the commit to the agent in this thread by sending it one of the two
+   * fixed `AGENT_ACTIONS` texts as an ordinary user message. The one method
+   * here that runs no git.
+   *
+   * The caller names a variant, never the text. This route is bb's local-auth
+   * API like every other, so a free-text field would let any local process
+   * put words in the human's mouth in their own thread; a closed set of two
+   * keeps the buttons the whole of what the plugin can say.
    */
   sendToAgent: {
-    input: threadInput.strict(),
+    input: threadInput.extend({ variant: z.enum(AGENT_ACTION_VARIANTS) }).strict(),
     output: agentMessageResultSchema,
   },
 });

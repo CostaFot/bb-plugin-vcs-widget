@@ -18,7 +18,7 @@ import {
 } from "./contracts";
 import { MAX_BRANCH_NAME_LENGTH, isValidRemoteName } from "./shared/branch-name";
 import {
-  AGENT_COMMIT_MESSAGE,
+  AGENT_ACTIONS,
   CHANGED_CHANNEL,
   JOB_CHANNEL,
   JOB_TIMEOUT_SECONDS,
@@ -498,23 +498,24 @@ export default async function plugin(bb: BbPluginApi) {
      * it, and the input carries no `visibility`, which is what makes it an
      * ordinary user message in the transcript.
      */
-    async sendToAgent({ threadId }) {
-      bb.log.info(`agent commit requested for thread ${threadId}`);
+    async sendToAgent({ threadId, variant }) {
+      const { message } = AGENT_ACTIONS[variant];
+      bb.log.info(`agent ${variant} requested for thread ${threadId}`);
       try {
         const sent = await bb.sdk.threads.send({
           threadId,
-          input: [{ type: "text", text: AGENT_COMMIT_MESSAGE, mentions: [] }],
+          input: [{ type: "text", text: message, mentions: [] }],
           mode: "queue-if-active",
         });
         return { ok: true as const, delivery: sent.delivery };
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        bb.log.warn(`agent commit for thread ${threadId} was not delivered: ${message}`);
+        const reason = error instanceof Error ? error.message : String(error);
+        bb.log.warn(`agent ${variant} for thread ${threadId} was not delivered: ${reason}`);
         return {
           ok: false as const,
           error: {
             code: "git_failed" as const,
-            message: `The message did not reach the agent: ${message}`,
+            message: `The message did not reach the agent: ${reason}`,
             hint: "Type it in the composer instead.",
           },
         };

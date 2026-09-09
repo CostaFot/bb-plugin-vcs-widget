@@ -1,6 +1,6 @@
 // Headless click-through of the commit panel's three later additions against
 // a running bb: the file row's context menu (Copy Path, Discard), the group
-// header's Discard All Changes, and the "LGTM - Commit" button that hands the
+// header's Discard All Changes, and the two agent buttons that hand the
 // commit to the agent in this thread.
 //
 //   node scripts/live-check.mjs setup /tmp/vcs-scratch          # once
@@ -128,9 +128,26 @@ try {
   // this starts has nothing to do.
   // The thread's own event log, not `bb thread history`: the prompt history
   // collapses identical prompts, so a second run would look like no message.
-  const sentCount = () => sh(`bb thread log ${H.THREAD}`).split("LGTM - Commit").length - 1;
+  // Only the plain one is clicked. Clicking "Agent Commit & Push" would tell a
+  // real agent to push, and the only thing it would prove beyond this — that
+  // the variant picks the other row of AGENT_ACTIONS — the server test already
+  // proves against that same table. So the push button is read, not pressed.
+  const button = async (variant, prop) =>
+    page.$eval(`${PANEL} [data-testid="vcs-agent-${variant}-button"]`, (e, p) => (p === "icon" ? e.querySelector("svg") !== null : e[p]), prop).catch(() => null);
+  const agentLabels = [await button("commit", "innerText"), await button("commit-push", "innerText")];
+  const enabled = [await button("commit", "disabled"), await button("commit-push", "disabled")];
+  const icons = [await button("commit", "icon"), await button("commit-push", "icon")];
+  step(
+    "M6-5 both agent buttons name the actor, carry the Sent icon and are enabled with nothing staged",
+    agentLabels.join("|") === "Agent Commit|Agent Commit & Push" && enabled.every((d) => d === false) && icons.every((i) => i === true),
+    `labels=[${agentLabels}] disabled=[${enabled}] icons=[${icons}]`,
+  );
+  await H.shot(page, "m6-5-agent-buttons");
+
+  // "LGTM - Commit" is a prefix of "LGTM - Commit & Push", so count the exact
+  // one: a log that ever carries both must not read as two of the first.
+  const sentCount = () => (sh(`bb thread log ${H.THREAD}`).match(/LGTM - Commit(?! & Push)/g) ?? []).length;
   const before = sentCount();
-  const disabled = await page.$eval(`${PANEL} [data-testid="vcs-agent-commit-button"]`, (e) => e.disabled).catch(() => null);
   await page.click(`${PANEL} [data-testid="vcs-agent-commit-button"]`);
   const sentNotice = await waitNotice(/sent to the agent|queued/i);
   let landed = false;
@@ -138,8 +155,8 @@ try {
     landed = sentCount() > before;
     if (!landed) await sleep(1500);
   }
-  step("M6-5 LGTM - Commit is always enabled and reaches the thread as a user message", disabled === false && /sent to the agent|queued/i.test(sentNotice) && landed, `notice="${sentNotice}" landed=${landed}`);
-  await H.shot(page, "m6-5-lgtm");
+  step("M6-6 Agent Commit reaches the thread as a user message reading \"LGTM - Commit\"", /sent to the agent|queued/i.test(sentNotice) && landed, `notice="${sentNotice}" landed=${landed}`);
+  await H.shot(page, "m6-6-agent-commit");
 } finally {
   await a.browser.close();
 }

@@ -59,10 +59,11 @@ drive them.
   into the panel and Cancel stops them. Discard always asks first with one
   command per category, and it comes at three sizes: a hover button on a
   row, a right-click menu on the row (Copy Path, Discard) and a header
-  button that discards a whole group. "LGTM - Commit" hands the commit to
-  the agent in this thread instead: it sends that text to the thread as if
-  you had typed it, so the agent that wrote the code writes the message and
-  commits.
+  button that discards a whole group. "Agent Commit" and "Agent Commit & Push"
+  hand the job to the agent in this thread instead: they send "LGTM - Commit"
+  or "LGTM - Commit & Push" to the thread as if you had typed it, so the agent
+  that wrote the code writes the message and commits. They carry a paper
+  plane, they run no git here, and they stay enabled whatever is staged.
 - A "Git Log" panel tab (the popup's Show Git Log row, the palette row, or
   Show Log on a branch): commits over all branches, the current branch or
   one branch, with the refs each commit carries as badges, a literal
@@ -191,7 +192,8 @@ picking one is a dialog this plugin does not have.
 | Discard (files new to git) | `git --literal-pathspecs rm -q --cached -- <paths>`; the file stays on disk as untracked |
 | Discard (untracked files) | `git --literal-pathspecs clean -f -- <paths>`; the file is deleted |
 | Diff preview | `git diff [--cached] -M --no-ext-diff -- <path>`, `git show HEAD:<path>` / `:<path>` for the two sides, `git diff --no-index -- /dev/null <path>` for an untracked file |
-| LGTM - Commit | no git at all: it sends "LGTM - Commit" to this thread's agent |
+| Agent Commit | no git at all: it sends "LGTM - Commit" to this thread's agent |
+| Agent Commit & Push | no git at all: it sends "LGTM - Commit & Push" to this thread's agent |
 
 The checkbox is the staged state and Commit commits the index, never a path
 list, so the list is exactly what the commit will contain. `--literal-pathspecs`
@@ -234,10 +236,12 @@ means a path from `git status` can never turn into a glob or pathspec magic.
   agent shell) can call them with a thread id, and a mutation on thread T
   runs on T's host. The plugin cannot close that from inside; it logs every
   mutation and every job with its thread id so misuse is at least visible.
-- The commit panel's "LGTM - Commit" button is the one RPC method that runs
-  no git: it sends a fixed text to the thread as an ordinary user message
-  (`queue-if-active`, so it waits behind a running turn rather than steering
-  it). It is reachable on the same local-auth route as the rest, and it is
-  logged with its thread id like every mutation. It widens nothing: a local
-  process that can call it can already send a thread any message it likes
-  through bb's own API.
+- The commit panel's two agent buttons are the one RPC method that runs no
+  git: it sends one of two fixed texts to the thread as an ordinary user
+  message (`queue-if-active`, so it waits behind a running turn rather than
+  steering it). The caller names a variant, never the text, so the two lines
+  in `AGENT_ACTIONS` are the whole of what the plugin can say to an agent. It
+  is reachable on the same local-auth route as the rest, and it is logged with
+  its thread id like every mutation. It widens nothing: a local process that
+  can call it can already send a thread any message it likes through bb's own
+  API.

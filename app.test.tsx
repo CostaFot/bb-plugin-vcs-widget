@@ -871,13 +871,29 @@ describe("CommitPanel", () => {
     const slot = renderCommitPanel({ rpc: { sendToAgent: () => ({ ok: true, delivery: "queued" }) } });
     await slot.findByText("staged.txt");
     const button = slot.getByTestId("vcs-agent-commit-button") as HTMLButtonElement;
-    expect(button.textContent).toBe("LGTM - Commit");
+    // The label names the actor, because "Commit" is taken by the button beside it.
+    expect(button.textContent).toBe("Agent Commit");
     // Commit itself is refused without a message; this one never is.
     expect((slot.getByTestId("vcs-commit-button") as HTMLButtonElement).disabled).toBe(true);
     expect(button.disabled).toBe(false);
     await user.click(button);
-    await waitFor(() => expect(calls(slot, "sendToAgent")).toEqual([{ threadId: "t1" }]));
+    await waitFor(() => expect(calls(slot, "sendToAgent")).toEqual([{ threadId: "t1", variant: "commit" }]));
     expect((await slot.findByTestId("vcs-commit-notice")).textContent).toContain("queued");
+  });
+
+  it("asks the agent to push too, without ever naming the text it sends", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel({ rpc: { sendToAgent: () => ({ ok: true, delivery: "sent" }) } });
+    await slot.findByText("staged.txt");
+    const button = slot.getByTestId("vcs-agent-commit-push-button") as HTMLButtonElement;
+    expect(button.textContent).toBe("Agent Commit & Push");
+    // Enabled with no upstream, unlike the panel's own push: the agent is the
+    // one that can set one up, so a disabled button would hide the way out.
+    expect(button.disabled).toBe(false);
+    await user.click(button);
+    await waitFor(() => expect(calls(slot, "sendToAgent")).toEqual([{ threadId: "t1", variant: "commit-push" }]));
+    // The notice quotes what went to the agent, which is not what the button says.
+    expect((await slot.findByTestId("vcs-commit-notice")).textContent).toContain("LGTM - Commit & Push");
   });
 
   it("reports an agent that could not be reached", async () => {
