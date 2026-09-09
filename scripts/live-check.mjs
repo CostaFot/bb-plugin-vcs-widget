@@ -1,4 +1,4 @@
-// Headless click-through of the VCS Group popup against a running bb.
+// Headless click-through of the VCS Widget popup against a running bb.
 //
 //   node scripts/live-check.mjs setup <repo>      create <repo>, <repo>.git (bare) and <repo>-clone2
 //   npm install --no-save puppeteer-core
@@ -182,7 +182,7 @@ try {
   step("S9 update ff-only says Fast-forward", /Fast-forward/.test(st9) && sh(`git -C ${REPO} log -1 --format=%s`) === "fourth from clone2", st9);
   await closePopup(page);
 
-  await palette(page, "VCS Group");
+  await palette(page, "VCS Widget");
   const rows10 = await paletteRows(page);
   step("S10a eight palette rows", rows10.length === 8, JSON.stringify(rows10));
   await clickPaletteRow(page, "Open branches");
@@ -191,14 +191,14 @@ try {
   await closePopup(page);
   await page.keyboard.press("Escape");
   await sleep(300);
-  await palette(page, "VCS Group: Push");
-  await clickPaletteRow(page, "VCS Group: Push");
+  await palette(page, "VCS Widget: Push");
+  await clickPaletteRow(page, "VCS Widget: Push");
   const cmd10 = await dialogCmd(page);
   await dialogButton(page, "Cancel");
   await sleep(600);
   step("S10c palette Push previews the tracked refspec", cmd10 === "git push --no-progress --end-of-options origin HEAD:refs/heads/main", `cmd="${cmd10}"`);
   await closePopup(page);
-  await page.evaluate((t) => window.dispatchEvent(new CustomEvent("vcs-group:open", { detail: { threadId: t, action: "fetch" } })), THREAD);
+  await page.evaluate((t) => window.dispatchEvent(new CustomEvent("vcs-widget:open", { detail: { threadId: t, action: "fetch" } })), THREAD);
   await sleep(1500);
   step("S10d foreign window event with detail is ignored", !(await page.$('[data-testid="vcs-branch-popup"]')) && !(await page.$('[data-testid="vcs-command-preview"]')));
 

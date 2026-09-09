@@ -369,7 +369,7 @@ describe("BranchButton", () => {
   it("ignores a window event that carries its own detail", async () => {
     const slot = render();
     act(() => {
-      window.dispatchEvent(new CustomEvent("vcs-group:open", { detail: { threadId: "t1", action: "fetch" } }));
+      window.dispatchEvent(new CustomEvent("vcs-widget:open", { detail: { threadId: "t1", action: "fetch" } }));
     });
     await new Promise((done) => setTimeout(done, 50));
     expect(screen.queryByTestId("vcs-branch-popup")).toBeNull();

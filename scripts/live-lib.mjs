@@ -134,7 +134,7 @@ export async function browserHelpers() {
     await sleep(800);
   }
   const paletteRows = (page) =>
-    page.evaluate(() => [...document.querySelectorAll('[cmdk-item], [role="option"]')].map((e) => e.innerText.replace(/\n+/g, " ")).filter((t) => /VCS Group:/.test(t)));
+    page.evaluate(() => [...document.querySelectorAll('[cmdk-item], [role="option"]')].map((e) => e.innerText.replace(/\n+/g, " ")).filter((t) => /VCS Widget:/.test(t)));
   async function clickPaletteRow(page, source) {
     const handle = await page.evaluateHandle((src) => [...document.querySelectorAll('[cmdk-item], [role="option"]')].find((e) => new RegExp(src).test(e.innerText)), source);
     if (handle && handle.asElement()) await handle.asElement().click();

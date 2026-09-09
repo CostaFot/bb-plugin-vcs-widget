@@ -1,4 +1,4 @@
-// VCS Group backend: resolves a thread to its environment, forwards git work
+// VCS Widget backend: resolves a thread to its environment, forwards git work
 // to the host worker on the machine that owns the worktree, relays the
 // worker's signals (job progress, file watch) to open app pages, and keeps
 // the favourites.
@@ -583,5 +583,5 @@ export default async function plugin(bb: BbPluginApi) {
     changes.dispose();
   });
 
-  bb.log.info("VCS Group loaded");
+  bb.log.info("VCS Widget loaded");
 }

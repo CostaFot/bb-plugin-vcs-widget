@@ -228,8 +228,8 @@ try {
   await H.shot(page, "m4-10-compare");
 
   // M4-11 a commit made in a terminal reaches the open log
-  await H.palette(page, "VCS Group: Show Git Log");
-  await H.clickPaletteRow(page, "VCS Group: Show Git Log");
+  await H.palette(page, "VCS Widget: Show Git Log");
+  await H.clickPaletteRow(page, "VCS Widget: Show Git Log");
   await page.waitForSelector(PANEL, { timeout: 15_000 });
   const popupOpen = !!(await page.$('[data-testid="vcs-branch-popup"]'));
   const rows11 = await H.paletteRows(page).catch(() => []);
@@ -242,7 +242,7 @@ try {
   // M4-12 eight palette rows
   await page.keyboard.press("Escape");
   await sleep(300);
-  await H.palette(page, "VCS Group");
+  await H.palette(page, "VCS Widget");
   const rows12 = await H.paletteRows(page);
   await page.keyboard.press("Escape");
   step("M4-12 eight palette rows, including Show Git Log", rows12.length === 8 && rows12.some((r) => /Show Git Log/.test(r)), JSON.stringify(rows12));

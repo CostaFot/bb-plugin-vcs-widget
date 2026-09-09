@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the plugin to "VCS Widget": the display name, the palette rows
+  (`VCS Widget: ...`), and the plugin id, which bb derives from the package
+  name and is now `vcs-widget`. A new id means a fresh settings and kv store,
+  so the plugin has to be removed and reinstalled and favourites start empty.
+  The repository directory and the Linear project keep their old names.
+
 ## 0.4.0 (2026-09-09) — milestone 4
 
 The plugin's own git log, as a thread panel tab.

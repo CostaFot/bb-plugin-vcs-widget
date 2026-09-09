@@ -13,7 +13,7 @@ for milestone 2, `scripts/live-check-m3.mjs` for milestone 3 and
 ```sh
 bb plugin install . --yes      # once
 bb plugin dev                  # terminal 1: rebuild + reload on save
-bb plugin logs vcs-group -f    # terminal 2
+bb plugin logs vcs-widget -f    # terminal 2
 ```
 
 A scratch repository with a bare origin and a second clone, then a bb thread
@@ -74,9 +74,9 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
    the Detached HEAD banner; `git switch main`: an open popup refreshes.
 9. Update Project after a commit pushed from the second clone: "Update
    Project: Fast-forward."
-10. Mod+Shift+P lists the seven `VCS Group:` rows (bb adds a settings row);
+10. Mod+Shift+P lists the seven `VCS Widget:` rows (bb adds a settings row);
     "Open branches" opens the popup; "Push..." shows the confirm dialog with
-    the tracked refspec; a `vcs-group:open` CustomEvent dispatched from the
+    the tracked refspec; a `vcs-widget:open` CustomEvent dispatched from the
     console with a `detail` opens nothing.
 11. A second browser on the same environment refetches after a checkout in
     the first.
@@ -162,7 +162,7 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
 13. Commit and Push commits, then the push dialog previews
     `git push --no-progress --end-of-options origin HEAD:refs/heads/main`;
     after Push the bare remote's `main` equals HEAD.
-14. The palette lists eight `VCS Group:` rows; "Commit..." opens the panel
+14. The palette lists eight `VCS Widget:` rows; "Commit..." opens the panel
     without opening the popup.
 
 ## Milestone 4 scenarios (`live-check-m4.mjs`)
@@ -190,10 +190,10 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
    that sha, checked out.
 10. Compare with the current branch opens the compare tab with the commit as
     the target revision.
-11. The palette row "VCS Group: Show Git Log" opens the panel without the
+11. The palette row "VCS Widget: Show Git Log" opens the panel without the
     popup, and a commit made in a terminal appears in the open log without
     a click.
-12. The palette lists eight `VCS Group:` rows.
+12. The palette lists eight `VCS Widget:` rows.
 
 ## Last run
 

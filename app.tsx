@@ -1,4 +1,4 @@
-// VCS Group frontend: a branch button in every thread header that opens the
+// VCS Widget frontend: a branch button in every thread header that opens the
 // Git branches popup, command palette rows that open it or run one of its
 // quick actions, and four side-panel tabs: compare branches and diff with
 // the working tree (from the context menu), the commit dialog and the log.
@@ -13,14 +13,14 @@ import { ComparePanel, DiffPanel } from "./views/panels";
 import "./app.css";
 
 const PALETTE_ROWS: { id: string; title: string; action: QuickActionId | null }[] = [
-  { id: "open-branches", title: "VCS Group: Open branches", action: null },
-  { id: "update-project", title: "VCS Group: Update Project", action: "update" },
-  { id: "commit", title: "VCS Group: Commit...", action: "commit" },
-  { id: "log", title: "VCS Group: Show Git Log", action: "log" },
-  { id: "fetch", title: "VCS Group: Fetch", action: "fetch" },
-  { id: "push", title: "VCS Group: Push...", action: "push" },
-  { id: "new-branch", title: "VCS Group: New Branch...", action: "new-branch" },
-  { id: "checkout-revision", title: "VCS Group: Checkout Tag or Revision...", action: "checkout-revision" },
+  { id: "open-branches", title: "VCS Widget: Open branches", action: null },
+  { id: "update-project", title: "VCS Widget: Update Project", action: "update" },
+  { id: "commit", title: "VCS Widget: Commit...", action: "commit" },
+  { id: "log", title: "VCS Widget: Show Git Log", action: "log" },
+  { id: "fetch", title: "VCS Widget: Fetch", action: "fetch" },
+  { id: "push", title: "VCS Widget: Push...", action: "push" },
+  { id: "new-branch", title: "VCS Widget: New Branch...", action: "new-branch" },
+  { id: "checkout-revision", title: "VCS Widget: Checkout Tag or Revision...", action: "checkout-revision" },
 ];
 
 export default definePluginApp((app) => {

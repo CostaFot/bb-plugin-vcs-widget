@@ -67,7 +67,7 @@ const savedEnv = { ...process.env };
 const harness = experimental_createHostEntryHarness(hostEntry);
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "vcs-group-host-"));
+  root = await mkdtemp(join(tmpdir(), "vcs-widget-host-"));
   repo = join(root, "repo");
   bare = join(root, "origin.git");
   other = join(root, "other");
@@ -96,7 +96,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await harness.experimental_dispose();
-  for (const key of ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "PATH", "VCS_GROUP_BUDGET_MS"]) {
+  for (const key of ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "PATH", "VCS_WIDGET_BUDGET_MS"]) {
     if (savedEnv[key] === undefined) delete process.env[key];
     else process.env[key] = savedEnv[key];
   }

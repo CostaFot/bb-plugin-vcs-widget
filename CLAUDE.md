@@ -1,15 +1,15 @@
-# bb-plugin-vcs-group
+# bb-plugin-vcs-widget
 
-A bb plugin (id `vcs-group`, display name "VCS Group") that recreates the
+A bb plugin (id `vcs-widget`, display name "VCS Widget") that recreates the
 IntelliJ / Android Studio Git branches popup inside bb: a branch button in the
 thread header, a searchable popup with Recent / Local / Remote branches, and
 git actions that run on the machine owning the thread's worktree.
 
 ## Work board
 
-Linear project `bb-plugin-vcs-group`, label `lab`, team `COS`. The plan lives
-in the issue descriptions, progress in issue comments (`claude: step N done,
-<what>`), never in files here.
+Linear project `bb-plugin-vcs-group` (named before the rename), label `lab`,
+team `COS`. The plan lives in the issue descriptions, progress in issue
+comments (`claude: step N done, <what>`), never in files here.
 
 - COS-121 Milestone 1: branch popup + checkout, new branch, update, push (full architecture, contracts, steps, verification) — shipped 2026-09-09
 - COS-122 Milestone 2: full context menu, background push/pull jobs, live refresh, favourites — shipped 2026-09-09
@@ -84,8 +84,8 @@ bb plugin types              # repin @get-bb/plugin-sdk to the running bb
 npm run check                # vitest + tsc --noEmit + bb plugin build
 bb plugin install . --yes    # once
 bb plugin dev                # rebuild + reload on save (needs a running bb)
-bb plugin logs vcs-group -f  # plugin log
-bb plugin reload vcs-group   # after `bb plugin build` without `dev`
+bb plugin logs vcs-widget -f  # plugin log
+bb plugin reload vcs-widget   # after `bb plugin build` without `dev`
 ```
 
 Live click-through: `docs/VERIFY.md`, driven by `scripts/live-check.mjs`

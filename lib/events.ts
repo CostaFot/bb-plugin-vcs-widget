@@ -5,7 +5,7 @@
 // The window event only says "look at the pending request".
 import type { QuickActionId } from "../shared/model";
 
-export const OPEN_EVENT = "vcs-group:open";
+export const OPEN_EVENT = "vcs-widget:open";
 
 export interface OpenRequest {
   threadId: string;

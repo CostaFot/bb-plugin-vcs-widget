@@ -205,7 +205,7 @@ try {
   await H.openPopup(page);
   await page.click('[data-action="fetch"]');
   const st13 = await H.waitStatus(page, /Fetched/);
-  const logs13 = sh(`bb plugin logs vcs-group | tail -20`);
+  const logs13 = sh(`bb plugin logs vcs-widget | tail -20`);
   step("M2-13 fetch runs as a background job", /Fetched/.test(st13) && /fetch job [0-9a-f-]+ started/.test(logs13) && /fetch job [0-9a-f-]+ finished/.test(logs13), st13);
   await H.closePopup(page);
 
@@ -262,7 +262,7 @@ try {
   await H.closePopup(page);
 
   // M2-18 the palette rows
-  await H.palette(page, "VCS Group");
+  await H.palette(page, "VCS Widget");
   const rows18 = await H.paletteRows(page);
   step("M2-18 eight palette rows", rows18.length === 8 && rows18.some((row) => /Checkout Tag or Revision/.test(row)), JSON.stringify(rows18));
   await page.keyboard.press("Escape");

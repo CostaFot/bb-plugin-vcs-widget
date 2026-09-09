@@ -214,9 +214,9 @@ try {
   // M3-14 palette: the rows, Commit... opens the panel directly
   await page.keyboard.press("Escape");
   await sleep(300);
-  await H.palette(page, "VCS Group");
+  await H.palette(page, "VCS Widget");
   const rows = await H.paletteRows(page);
-  await H.clickPaletteRow(page, "VCS Group: Commit");
+  await H.clickPaletteRow(page, "VCS Widget: Commit");
   await sleep(1500);
   const popupOpen = !!(await page.$('[data-testid="vcs-branch-popup"]'));
   const panelOpen = !!(await page.$(PANEL));

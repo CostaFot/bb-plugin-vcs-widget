@@ -1,5 +1,5 @@
 {
-  "name": "bb-plugin-vcs-group",
+  "name": "bb-plugin-vcs-widget",
   "version": "0.4.0",
   "description": "IntelliJ-style Git branches popup, commit dialog and log for bb.",
   "license": "MIT",
@@ -15,7 +15,7 @@
     "check": "npm test && npm run typecheck && npm run build"
   },
   "bb": {
-    "name": "VCS Group",
+    "name": "VCS Widget",
     "description": "IntelliJ-style Git branches popup in the thread header, a commit dialog and a git log panel: search, favourites, checkout, new branch, the full per-branch context menu (rebase, merge, compare, diff, worktrees, rename, delete), staging, diff preview, commit, amend, history with cherry-pick, revert and reset, background fetch, pull and push, running on the machine that owns the worktree.",
     "branding": {
       "icon": "GitBranch"

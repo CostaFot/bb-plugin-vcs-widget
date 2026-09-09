@@ -30,9 +30,9 @@ export interface Budget {
   deadlineFor(kind: DeadlineKind): number;
 }
 
-/** Test hook: `VCS_GROUP_BUDGET_MS` shrinks the budget so timeouts are quick. */
+/** Test hook: `VCS_WIDGET_BUDGET_MS` shrinks the budget so timeouts are quick. */
 function configuredBudgetMs(): number {
-  const raw = process.env.VCS_GROUP_BUDGET_MS;
+  const raw = process.env.VCS_WIDGET_BUDGET_MS;
   const parsed = raw === undefined ? Number.NaN : Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BUDGET_MS;
 }

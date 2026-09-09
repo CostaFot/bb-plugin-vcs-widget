@@ -1,4 +1,4 @@
-# VCS Group for bb
+# VCS Widget for bb
 
 IntelliJ's Git branches popup, commit dialog and log, inside bb. A branch
 button in every thread header opens a searchable popup with Favorites /
@@ -72,7 +72,7 @@ drive them.
   files, per-file patch) and "Diff with working tree", both rendered with
   bb's diff viewer. Compare also takes a revision, which is how the log
   compares one commit with the current branch.
-- Eight command palette rows (`VCS Group: ...`) on thread routes.
+- Eight command palette rows (`VCS Widget: ...`) on thread routes.
 - Live refresh: bb's sidebar follows a plugin checkout within a few seconds,
   every open popup for the same repository refetches after an action or a
   job, and changes made by an agent or a terminal reach open popups through
@@ -80,7 +80,7 @@ drive them.
 
 ## Settings
 
-Under Settings → Installed plugins → VCS Group:
+Under Settings → Installed plugins → VCS Widget:
 
 - Update Project strategy: `ff-only` (default), `rebase`, `merge`
 - Auto-stash before Update Project (off)

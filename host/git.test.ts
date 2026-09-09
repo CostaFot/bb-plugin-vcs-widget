@@ -34,7 +34,7 @@ describe.skipIf(process.platform === "win32")("runGit", () => {
   const savedPath = process.env.PATH;
 
   beforeAll(async () => {
-    root = await mkdtemp(join(tmpdir(), "vcs-group-git-"));
+    root = await mkdtemp(join(tmpdir(), "vcs-widget-git-"));
     const { stdout } = await exec("sh", ["-c", "command -v git"]);
     await mkdir(join(root, "bin"));
     await writeFile(

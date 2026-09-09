@@ -68,7 +68,7 @@ function setup(options: {
   const released = { count: 0 };
   const environment = options.environment === undefined ? READY_ENVIRONMENT : options.environment;
   const { bb, harness } = createFakePluginHost({
-    pluginId: "vcs-group",
+    pluginId: "vcs-widget",
     settings: options.settings,
     sdk: {
       threads: {
