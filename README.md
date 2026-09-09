@@ -18,7 +18,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 
 ## Popup
 
-<img src="docs/screenshots/popup.png" alt="The branch popup open under the thread header" width="340"> <img src="docs/screenshots/branch-menu.png" alt="The menu on a branch row, from its '...' button" width="340">
+<img src="docs/screenshots/popup-combo.png" alt="The branch popup, the menu on a branch row, and the New Branch and Checkout Tag or Revision dialogs" width="720">
 
 - Search, then Favourites / Recent / Local / Remote, each row with ahead/behind,
   gone and worktree badges. A star toggles a favourite, kept per machine and
@@ -36,8 +36,6 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
   pane, or before a reload, shows up too.
 - A conflict banner with Abort while a merge, rebase, cherry-pick or revert is
   in progress.
-
-<img src="docs/screenshots/new-branch.png" alt="The New Branch dialog under the thread header" width="340"> <img src="docs/screenshots/checkout-revision.png" alt="The Checkout Tag or Revision dialog under the thread header" width="340">
 
 ## Commit panel
 

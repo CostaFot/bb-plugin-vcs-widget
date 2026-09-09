@@ -138,7 +138,10 @@ pane, and the log shot is worth having over a real history, which the scratch
 repo has not got. `scripts/hero.mjs` composes the README's header
 image (`docs/screenshots/hero.png`) from those shots and `docs/hero/`
 (the background and the thread-header crop) by photographing a local HTML
-page, so it needs Chromium but no running bb.
+page, so it needs Chromium but no running bb. `scripts/popup-combo.mjs`
+composes `popup-combo.png`, the Popup section's one image, the same way, from
+`popup.png`, `branch-menu.png`, `new-branch.png` and `checkout-revision.png`
+— the four hand-taken shots the README no longer shows separately.
 
 Vendor UI with `npx shadcn add @bb/<name>` (registry pinned in
 `components.json`); components live in `components/ui/` and are ours to edit.
