@@ -1,5 +1,4 @@
-The Git branches popup, commit dialog and log from IntelliJ and Android
-Studio, in bb's thread header.
+IntelliJ-style VCS popup, commit dialog and log, inside bb.
 
 ## What you get
 
@@ -35,18 +34,26 @@ Studio, in bb's thread header.
 ## How it works
 
 Git runs only as an argv on the plugin's host worker, on the machine that
-owns the worktree, never through a shell. Every push, merge, rebase, delete,
+owns the worktree, never through a shell. 
+
+Every push, merge, rebase, delete,
 worktree, detached checkout, amend, cherry-pick, revert, reset and discard
 shows the exact command first, then runs that or refuses with a typed reason.
+
+
 Force push exists only as `--force-with-lease` against the sha the dialog
-showed. Commit messages travel on git's stdin, and paths reach git only after
+showed. 
+
+Commit messages travel on git's stdin, and paths reach git only after
 `--literal-pathspecs ... --`. Nothing mutates while the index is locked or a
 merge or rebase is in progress; the popup offers Abort instead.
 
 ## For agents
 
 `bb vcs-widget status | branches | log` and the `vcs_widget_status` tool read
-the repository behind a thread, on the machine that owns the worktree. Both
+the repository behind a thread, on the machine that owns the worktree. 
+
+Both
 only read: no plugin command, flag or tool checks out, commits, pushes,
 rebases or deletes anything, and a bundled skill says so. Checkout, commit
 and push stay with the human at the popup, the Commit panel and the log.
