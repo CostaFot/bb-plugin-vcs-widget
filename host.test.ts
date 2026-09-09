@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ActionResult, BranchRef, JobStart, Overview } from "./contracts";
 import hostEntry from "./host";
 import { waitForJob } from "./host/jobs";
+import { relevant } from "./host/watch";
 import { tryWithRepoLock } from "./host/locks";
 
 const exec = promisify(execFile);
@@ -825,6 +826,27 @@ describe("commit panel", () => {
 });
 
 describe("watch", () => {
+  it("reads an ignored directory relative to the watched root", () => {
+    const gitDir = "/home/me/work/app/.git";
+    expect(relevant(gitDir, `${gitDir}/HEAD`)).toBe(true);
+    expect(relevant(gitDir, `${gitDir}/refs/heads/main`)).toBe(true);
+    expect(relevant(gitDir, `${gitDir}/objects/ab/cdef`)).toBe(false);
+    expect(relevant(gitDir, `${gitDir}/logs/HEAD`)).toBe(false);
+    expect(relevant(gitDir, `${gitDir}/worktrees/w/logs/HEAD`)).toBe(false);
+    expect(relevant(gitDir, `${gitDir}/objects/pack/x.pack`)).toBe(false);
+    expect(relevant(gitDir, `${gitDir}/refs/x.tmp`)).toBe(false);
+  });
+
+  it("keeps a repository whose own path contains an ignored name", () => {
+    // The bug this replaced dropped every event for these, so the popup
+    // never refreshed on its own.
+    for (const root of ["/home/me/modules/app/.git", "/srv/logs/app/.git", "/var/objects/app/.git"]) {
+      expect(relevant(root, `${root}/HEAD`)).toBe(true);
+      expect(relevant(root, `${root}/refs/heads/main`)).toBe(true);
+      expect(relevant(root, `${root}/objects/ab/cdef`)).toBe(false);
+    }
+  });
+
   it("registers one watch per git dir on the first overview and signals relevant changes", async () => {
     type Listener = (event: { kind: "changed"; changes: { path: string; type: "create" | "update" | "delete" }[] } | { kind: "rescan-required" } | { kind: "watch-error"; message: string }) => void | Promise<void>;
     const registered: { rootPath: string; ignoredPaths?: readonly string[] }[] = [];

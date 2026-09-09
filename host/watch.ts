@@ -4,6 +4,22 @@
 // `changed` signal per worktree that uses that directory. Watches are
 // idempotent per directory, released after an idle period, and capped well
 // under the daemon's 256-per-worker limit.
+//
+// `ignoredPaths` is root-relative, and a plain directory name is the right
+// syntax: bb hands the list to @parcel/watcher, whose wrapper resolves every
+// non-glob entry against the watched root and then prefix-matches it, so
+// `objects` drops the whole subtree. On Linux the recursive walk skips those
+// directories outright, so an ignored one costs no inotify watch at all --
+// which is the difference between a handful of watches and one per loose
+// object directory. bb's own git watcher passes the same shape.
+//
+// Measured on a repository holding 50k loose objects (2026-09-09): the git
+// dir is 265 directories, of which the ignore list leaves 4. Writing those
+// objects produced 50,441 watcher events without the ignores and none with
+// them. The ignores are what carries that, not `relevant()` below: past
+// 4,096 paths in one window the daemon throws the batch away and sends
+// `rescan-required` instead, which has no paths to filter and always costs
+// an overview read. Unignored, that unpack forced three of them.
 import type { RepoInfo } from "./repo";
 
 interface WatchOptions {
@@ -29,6 +45,8 @@ export interface WatchContext {
 export type EmitChanged = (repoRoot: string, reason: string) => Promise<void>;
 
 interface Entry {
+  /** The watched directory, so an event can be read relative to it. */
+  dir: string;
   subscription: Subscription | null;
   pending: Promise<void> | null;
   repoRoots: Set<string>;
@@ -38,6 +56,8 @@ interface Entry {
 export const WATCH_IDLE_MS = 15 * 60_000;
 export const MAX_WATCHES = 200;
 const SWEEP_MS = 60_000;
+// A real fetch settles into one signal; continuous churn is capped at one per
+// MAX_WAIT_MS (measured: 7 signals over 10 s of writes every 100 ms).
 const DEBOUNCE_MS = 300;
 const MAX_WAIT_MS = 1_500;
 
@@ -47,11 +67,24 @@ const IGNORED = ["objects", "lfs", "hooks", "info", "logs", "modules", "rr-cache
 const entries = new Map<string, Entry>();
 let sweeper: ReturnType<typeof setInterval> | null = null;
 
-function relevant(path: string): boolean {
-  const normalized = path.replace(/\\/gu, "/");
-  const parts = normalized.split("/").filter((part) => part.length > 0);
-  // Absolute paths: keep the last segments that sit under the git dir; any
-  // ignored directory name anywhere in the path is enough to drop it.
+/**
+ * The second filter, applied to what the watcher still delivers: the ignore
+ * list again (a backend other than inotify may only filter, and a linked
+ * worktree's own reflog sits below the common dir's top level) plus the pack
+ * suffixes, which are not expressible as an ignored path.
+ *
+ * Matching is relative to the watched directory, never absolute: a repository
+ * under a directory named `modules` or `logs` would otherwise have every one
+ * of its events dropped and never refresh.
+ */
+export function relevant(root: string, path: string): boolean {
+  const slash = (value: string) => value.replace(/\\/gu, "/").replace(/\/+$/u, "");
+  const normalized = slash(path);
+  const prefix = `${slash(root)}/`;
+  // Anything the watcher reports from outside its root is kept: guessing is
+  // worse than one extra read.
+  const inside = normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
+  const parts = inside.split("/").filter((part) => part.length > 0);
   if (parts.some((part) => IGNORED.includes(part))) return false;
   const last = parts[parts.length - 1] ?? "";
   return !/\.(?:pack|idx|bitmap|tmp)$/u.test(last);
@@ -67,7 +100,7 @@ export function ensureWatch(repo: RepoInfo, context: WatchContext, emit: EmitCha
     let entry = entries.get(dir);
     if (entry === undefined) {
       if (entries.size >= MAX_WATCHES) evictOldest();
-      entry = { subscription: null, pending: null, repoRoots: new Set(), lastUsed: Date.now() };
+      entry = { dir, subscription: null, pending: null, repoRoots: new Set(), lastUsed: Date.now() };
       entries.set(dir, entry);
     }
     entry.repoRoots.add(repo.repoRoot);
@@ -104,7 +137,7 @@ export function ensureWatch(repo: RepoInfo, context: WatchContext, emit: EmitCha
 async function onEvent(entry: Entry, event: WatchEvent, emit: EmitChanged): Promise<void> {
   let reason: string;
   if (event.kind === "changed") {
-    if (!event.changes.some((change) => relevant(change.path))) return;
+    if (!event.changes.some((change) => relevant(entry.dir, change.path))) return;
     reason = "watch";
   } else if (event.kind === "rescan-required") {
     reason = "watch:rescan";
