@@ -2,7 +2,7 @@
 
 ![The branch popup, the commit panel and the git log under a bb thread header](docs/screenshots/hero.png)
 
-The Git branches popup, commit dialog and log from IntelliJ, inside bb.
+IntelliJ-style VCS popup, commit dialog and log, inside bb.
 
 ## Requirements
 
