@@ -9,10 +9,15 @@
 // path to have it stage a change first (it resets that repository, so never
 // pass one you care about).
 //
-// Writes docs/screenshots/*.png. Needs system Chromium and puppeteer-core,
-// like the live checks (see docs/VERIFY.md). The diff viewer is left
-// unopened on purpose: headless Chromium has no code theme registered, so it
-// would photograph as an empty pane.
+// Writes docs/screenshots/popup.png, log.png and settings.png. Needs system
+// Chromium and puppeteer-core, like the live checks (see docs/VERIFY.md).
+// The diff viewer is left unopened on purpose: headless Chromium has no code
+// theme registered, so it would photograph as an empty pane.
+//
+// commit.png is deliberately not on that list. The commit panel is worth
+// showing with a diff open, which is the one thing this script cannot
+// photograph, so that shot is taken by hand from a real browser and this
+// script must not overwrite it.
 import { mkdirSync } from "node:fs";
 import { GIT_ID, browserHelpers, sh, sleep } from "./live-lib.mjs";
 
@@ -41,14 +46,6 @@ try {
   await H.openPopup(page);
   await sleep(1200);
   await clip("popup", '[data-testid="vcs-branch-popup"]');
-
-  await page.click('[data-testid="vcs-branch-popup"] [data-action="commit"]');
-  await page.waitForSelector('[data-testid="vcs-commit-panel"]', { timeout: 20_000 });
-  await sleep(2500);
-  await page.click('[data-testid="vcs-commit-panel"] [data-testid="vcs-commit-message"]');
-  await page.keyboard.type("Milestone 5: settings sections, a read-only CLI and agent tool");
-  await sleep(500);
-  await clip("commit", '[data-testid="vcs-commit-panel"]');
 
   await H.openPopup(page);
   await page.click('[data-testid="vcs-branch-popup"] [data-action="log"]');
