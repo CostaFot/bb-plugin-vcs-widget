@@ -39,7 +39,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 
 ## Commit panel
 
-![The commit panel with a file selected](docs/screenshots/commit.png)
+<img src="docs/screenshots/commit.png" alt="The commit panel with a file selected" width="420">
 
 - The working tree as Conflicts / Changes / Unversioned files, with IntelliJ's
   status letters.
@@ -59,7 +59,7 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 
 ## Git log
 
-![The git log panel with a commit selected](docs/screenshots/log.png)
+<img src="docs/screenshots/log.png" alt="The git log panel with a commit selected" width="420">
 
 - Commits over all branches, the current branch or one branch, with the refs
   each commit carries as badges and a literal message filter. Rows are
