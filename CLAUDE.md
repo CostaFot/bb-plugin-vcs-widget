@@ -130,10 +130,12 @@ CLI, the settings sections, a 390 px pass) and `scripts/live-check-m6.mjs`
 a real message to the thread) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
 unique per run, the scratch repo is reused). `scripts/screenshots.mjs`
-regenerates `docs/screenshots/{popup,log,settings}.png` for the README; with
-no repository argument it touches no git. `commit.png` is hand-taken and the
-script leaves it alone, because the shot is worth having with a diff open and
-headless Chromium photographs the diff viewer as an empty pane. `scripts/hero.mjs` composes the README's header
+regenerates `docs/screenshots/{popup,settings}.png` for the README; with
+no repository argument it touches no git. `commit.png` and `log.png` are
+hand-taken and the script leaves them alone: the commit shot is worth having
+with a diff open and headless Chromium photographs the diff viewer as an empty
+pane, and the log shot is worth having over a real history, which the scratch
+repo has not got. `scripts/hero.mjs` composes the README's header
 image (`docs/screenshots/hero.png`) from those shots and `docs/hero/`
 (the background and the thread-header crop) by photographing a local HTML
 page, so it needs Chromium but no running bb.

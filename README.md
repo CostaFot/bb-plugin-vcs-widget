@@ -71,6 +71,8 @@ bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
   Revert Commit, Reset Current Branch to Here (Soft / Mixed / Hard), Compare
   with current and Copy Revision Number.
 
+<img src="docs/screenshots/log-menu.png" alt="The right-click menu on a commit in the git log" width="420">
+
 ## More
 
 - Two more panel tabs: "Compare branches" (the commits only on either side, the

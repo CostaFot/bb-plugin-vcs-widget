@@ -5,19 +5,21 @@
 //
 // With no argument it only photographs what the thread already shows and
 // never touches git — point it at a thread whose worktree has a couple of
-// uncommitted changes and a readable history. Pass the scratch repository
+// uncommitted changes. Pass the scratch repository
 // path to have it stage a change first (it resets that repository, so never
 // pass one you care about).
 //
-// Writes docs/screenshots/popup.png, log.png and settings.png. Needs system
-// Chromium and puppeteer-core, like the live checks (see docs/VERIFY.md).
-// The diff viewer is left unopened on purpose: headless Chromium has no code
-// theme registered, so it would photograph as an empty pane.
+// Writes docs/screenshots/popup.png and settings.png. Needs system Chromium
+// and puppeteer-core, like the live checks (see docs/VERIFY.md). The diff
+// viewer is left unopened on purpose: headless Chromium has no code theme
+// registered, so it would photograph as an empty pane.
 //
-// commit.png is deliberately not on that list. The commit panel is worth
-// showing with a diff open, which is the one thing this script cannot
-// photograph, so that shot is taken by hand from a real browser and this
-// script must not overwrite it.
+// commit.png and log.png are deliberately not on that list. Both panels are
+// worth showing full: the commit one with a diff open, which is the thing
+// this script cannot photograph, and the log one with a real history and a
+// commit whose message fills the detail pane, which a scratch repository has
+// not got. Those two shots are taken by hand from a real browser and this
+// script must not overwrite them.
 import { mkdirSync } from "node:fs";
 import { GIT_ID, browserHelpers, sh, sleep } from "./live-lib.mjs";
 
@@ -46,14 +48,6 @@ try {
   await H.openPopup(page);
   await sleep(1200);
   await clip("popup", '[data-testid="vcs-branch-popup"]');
-
-  await H.openPopup(page);
-  await page.click('[data-testid="vcs-branch-popup"] [data-action="log"]');
-  await page.waitForSelector('[data-testid="vcs-log-panel"]', { timeout: 20_000 });
-  await sleep(2500);
-  await page.click('[data-testid="vcs-log-panel"] [data-sha]').catch(() => {});
-  await sleep(2000);
-  await clip("log", '[data-testid="vcs-log-panel"]');
 
   await page.goto(`${BASE}/settings/plugins/vcs-widget`, { waitUntil: "load", timeout: 60_000 });
   await sleep(4000);
