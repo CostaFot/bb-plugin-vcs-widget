@@ -85,14 +85,61 @@ export async function browserHelpers() {
     }
     return false;
   }
+  /**
+   * What the DOM looked like when a click on the branch button did not open
+   * the popup (COS-127, seen once and never reproduced). `buttonReachable` is
+   * the decisive one: it hit-tests the button's own centre, so an overlay
+   * still covering it, or a `pointer-events: none` left on the body by a
+   * dialog that closed, shows up as a fact instead of a theory.
+   */
+  async function overlayState(page) {
+    return page.evaluate(() => {
+      const describe = (el) => {
+        if (!el) return "none";
+        const role = el.getAttribute?.("role");
+        const classes = [...(el.classList ?? [])].slice(0, 3).map((name) => `.${name}`).join("");
+        return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${classes}${role ? `[role=${role}]` : ""}`;
+      };
+      const button = document.querySelector('[data-testid="vcs-branch-button"]');
+      const box = button?.getBoundingClientRect() ?? null;
+      const hit = box ? document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) : null;
+      const hiddenAncestors = [];
+      for (let node = button; node; node = node.parentElement) {
+        if (node.getAttribute?.("aria-hidden") === "true" || node.hasAttribute?.("inert")) hiddenAncestors.push(describe(node));
+      }
+      return {
+        buttonReachable: Boolean(button && hit && (button === hit || button.contains(hit) || hit.contains(button))),
+        hitTest: describe(hit),
+        bodyPointerEvents: document.body.style.pointerEvents || "(unset)",
+        computedBodyPointerEvents: getComputedStyle(document.body).pointerEvents,
+        bodyOverflow: document.body.style.overflow || "(unset)",
+        activeElement: describe(document.activeElement),
+        hiddenAncestors,
+        layers: [...document.querySelectorAll('[role="dialog"],[role="alertdialog"],[data-radix-popper-content-wrapper],[data-sonner-toast]')]
+          .map((el) => `${describe(el)}@${el.getAttribute("data-state") ?? "-"}`)
+          .slice(0, 12),
+      };
+    });
+  }
   async function openPopup(page) {
     if (await page.$('[data-testid="vcs-branch-popup"]')) return;
     await page.click('[data-testid="vcs-branch-button"]');
-    await page.waitForSelector('[data-testid="vcs-branch-popup"]', { timeout: 15_000 });
+    try {
+      await page.waitForSelector('[data-testid="vcs-branch-popup"]', { timeout: 15_000 });
+    } catch (cause) {
+      const tag = `openPopup-failed-${Date.now()}`;
+      console.log(`[openPopup] the popup did not open; DOM state follows (screenshot /tmp/vcs-e2e/${tag}.png)`);
+      console.log(JSON.stringify(await overlayState(page).catch((error) => ({ captureFailed: String(error) })), null, 2));
+      await shot(page, tag);
+      throw cause;
+    }
     await sleep(1500);
   }
   const popupText = async (page) => (await page.$eval('[data-testid="vcs-branch-popup"]', (e) => e.innerText).catch(() => "")).replace(/\n+/g, " | ");
   const statusText = async (page) => (await page.$eval('[data-testid="vcs-branch-popup"] [role="status"]', (e) => e.innerText).catch(() => "")).replace(/\n+/g, " | ");
+  /** The repository's own banners, which a retained outcome can otherwise be mistaken for. */
+  const bannerTexts = (page) =>
+    page.evaluate(() => [...document.querySelectorAll('[data-testid="vcs-banner"]')].map((e) => e.innerText.trim()));
   async function closePopup(page) {
     for (let i = 0; i < 3 && (await page.$('[data-testid="vcs-branch-popup"]')); i += 1) {
       await page.keyboard.press("Escape");
@@ -172,8 +219,10 @@ export async function browserHelpers() {
     label,
     waitLabel,
     openPopup,
+    overlayState,
     popupText,
     statusText,
+    bannerTexts,
     closePopup,
     waitStatus,
     dialogCmd,

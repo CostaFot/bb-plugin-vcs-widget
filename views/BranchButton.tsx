@@ -19,6 +19,9 @@ import { Icon } from "@/components/ui/icon";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
+/** How long a confirmed action's outcome survives the popup closing. */
+const STATUS_RETAIN_MS = 60_000;
+
 export interface BranchButtonProps {
   threadId: string;
   projectId: string;
@@ -57,9 +60,11 @@ export function BranchButton({ threadId, isCompactViewport }: BranchButtonProps)
   const clearStatus = actions.clearStatus;
   const refetchFavourites = favourites.refetch;
   const openPopup = useCallback(() => {
-    // Reopening: forget the last action's outcome and read the repository
-    // again, so a lock or an external checkout shows without an action.
-    clearStatus();
+    // Reopening: read the repository again, so a lock or an external checkout
+    // shows without an action. A confirmed action closed the popup and
+    // reported by toast, so its outcome is kept for a minute -- dated, and
+    // alongside the summary -- and only then forgotten.
+    clearStatus(STATUS_RETAIN_MS);
     if (everOpenedRef.current) {
       void refetch();
       void refetchFavourites();

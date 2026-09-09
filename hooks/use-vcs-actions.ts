@@ -45,8 +45,9 @@ import { unexpectedGitError } from "../lib/errors";
 export type ActionStatus =
   | { kind: "idle" }
   | { kind: "busy"; text: string }
-  | { kind: "ok"; text: string }
-  | { kind: "error"; error: GitError };
+  /** `at` is when the outcome landed: the popup shows its age once it is old. */
+  | { kind: "ok"; text: string; at: number }
+  | { kind: "error"; error: GitError; at: number };
 
 export interface ConfirmRequest {
   title: string;
@@ -126,11 +127,11 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     (result: ActionResult, options: { closeOnSuccess?: boolean }) => {
       if (result.overview !== null) applyOverview(result.overview);
       if (result.ok) {
-        setStatus({ kind: "ok", text: result.message });
+        setStatus({ kind: "ok", text: result.message, at: Date.now() });
         if (!quiet) toast.success(result.message);
         if (options.closeOnSuccess) onCheckedOut();
       } else {
-        setStatus({ kind: "error", error: result.error });
+        setStatus({ kind: "error", error: result.error, at: Date.now() });
         if (!quiet) toast.error(result.error.message);
       }
     },
@@ -140,7 +141,7 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
   /** An action the app refused before any call: reported like a failed one. */
   const refuse = useCallback(
     (error: GitError) => {
-      setStatus({ kind: "error", error });
+      setStatus({ kind: "error", error, at: Date.now() });
       if (!quiet) toast.error(error.message);
     },
     [quiet],
@@ -164,7 +165,7 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
         return result;
       } catch (cause) {
         const error = unexpectedGitError(cause);
-        setStatus({ kind: "error", error });
+        setStatus({ kind: "error", error, at: Date.now() });
         if (!quiet) toast.error(error.message);
         return null;
       } finally {
@@ -195,7 +196,7 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
         return result;
       } catch (cause) {
         const error = unexpectedGitError(cause);
-        setStatus({ kind: "error", error });
+        setStatus({ kind: "error", error, at: Date.now() });
         if (!quiet) toast.error(error.message);
         return null;
       } finally {
@@ -705,7 +706,20 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
     [confirm],
   );
 
-  const clearStatus = useCallback(() => setStatus((current) => (current.kind === "busy" ? current : { kind: "idle" })), []);
+  /**
+   * Forgets the last outcome when the popup reopens. `retainMs` keeps one that
+   * is still recent: a confirmed action closes the popup and reports by toast,
+   * and the toast is usually gone by the time anyone looks again, so the only
+   * place its stderr survives is here.
+   */
+  const clearStatus = useCallback(
+    (retainMs = 0) =>
+      setStatus((current) => {
+        if (current.kind === "busy" || current.kind === "idle") return current;
+        return Date.now() - current.at < retainMs ? current : { kind: "idle" };
+      }),
+    [],
+  );
 
   return {
     status,

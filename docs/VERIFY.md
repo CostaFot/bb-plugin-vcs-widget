@@ -74,7 +74,8 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
    returns to the list; create with checkout switches; create without
    checkout keeps the popup open with "Created ...".
 5. Update Project on a branch without upstream: `no_upstream` with hint; the
-   status line is clean again on the next open.
+   next open still shows it, dated (`· 12 s ago`) with the repository summary
+   underneath, and the status line is clean again a minute later.
 6. Push on a new branch: dialog previews `git push --no-progress -u
    --end-of-options origin HEAD`; Cancel runs nothing; Confirm pushes and
    sets the upstream. A commit later, Push previews `git push --no-progress
@@ -83,7 +84,10 @@ Environment: `BB_SERVER_URL` (default `http://127.0.0.1:38886`), `CHROMIUM`
    "upstream is gone" banner shows and Push offers `-u` again.
 7. `touch .git/index.lock`: opening the popup shows the lock banner at once,
    a checkout answers `index_locked` without running git; after removing the
-   lock, reopening shows neither the banner nor the old error.
+   lock, reopening drops the banner and keeps the last outcome, dated. The
+   refused click is not that outcome: a blocked row explains by toast and
+   never writes the status line. Banners render inside the status region, so
+   they are tagged `data-testid="vcs-banner"` to be read apart from it.
 8. `git checkout --detach` in a terminal: label is a short sha, popup shows
    the Detached HEAD banner; `git switch main`: an open popup refreshes.
 9. Update Project after a commit pushed from the second clone: "Update
@@ -298,7 +302,15 @@ scenarios 1 to 14 (16 steps), milestone 4 scenarios 1 to 12 (12 steps) and
 milestone 5 scenarios 1 to 14 pass headlessly (see the COS-121 to COS-125
 comments). Scenario 13 of milestone 1 waits for a remote machine (COS-126).
 The milestone 1 push step once failed to reopen the popup after a cancelled
-dialog and passed on the rerun (COS-127).
+dialog and passed on the rerun (COS-127). It has not happened since. `openPopup`
+now prints the DOM state instead of a bare timeout when it does: whether the
+button is reachable by a hit test at its own centre, what element is there
+instead, `document.body`'s pointer-events, the active element, any
+`aria-hidden` or `inert` ancestor, and every open dialog and popper layer with
+its `data-state`. It also writes a screenshot. Radix reaches the plugin through
+bb's shared runtime (`globalThis.__bbPluginRuntime`), not a bundled copy, so
+the layer bookkeeping that owns `pointer-events` is one instance across bb and
+the plugin, and split module state is not the explanation.
 
 The commit panel additions (six scenarios) pass headlessly on the same
 machine, 2026-09-09, and milestone 3 was rerun whole against the restructured

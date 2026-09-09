@@ -32,6 +32,12 @@ function elapsed(startedAt: number): string {
   return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`;
 }
 
+/** An outcome older than this survived a reopen, so it is dated and joined by the summary. */
+const RETAINED_AFTER_MS = 5_000;
+
+const retained = (at: number) => Date.now() - at >= RETAINED_AFTER_MS;
+const since = (at: number) => (retained(at) ? ` · ${elapsed(at)} ago` : "");
+
 /** Repository banners (detached, in-progress operation, lock, jobs) and the last action's outcome. */
 export function StatusLine({ status, overview, loading, loadError, jobProgress, onCancelJob, onAbort }: StatusLineProps) {
   const banners: string[] = [];
@@ -48,6 +54,17 @@ export function StatusLine({ status, overview, loading, loadError, jobProgress, 
   const operation = overview && overview.operation !== "none" ? overview.operation : null;
   // Another pane's job (or one from before a reload): the overview knows it.
   const foreignJob = overview?.activeJob && overview.activeJob.jobId !== jobProgress?.jobId ? overview.activeJob : null;
+  // Where the repository stands. Shown on its own when nothing has been done,
+  // and under a retained outcome, which would otherwise hide it for a minute.
+  const repoSummary = overview ? (
+    <p className={cn("truncate text-muted-foreground")}>
+      {overview.repoName}
+      {overview.upstream
+        ? ` · ${overview.upstream.name}${overview.upstream.ahead ? ` ↑${overview.upstream.ahead}` : ""}${overview.upstream.behind ? ` ↓${overview.upstream.behind}` : ""}`
+        : " · no upstream"}
+      {loading ? " · refreshing…" : ""}
+    </p>
+  ) : null;
 
   return (
     <div role="status" aria-live="polite" className="border-t border-border px-3 py-1.5 text-xs">
@@ -55,7 +72,9 @@ export function StatusLine({ status, overview, loading, loadError, jobProgress, 
         <p className="text-destructive">Could not read the repository: {loadError}</p>
       ) : null}
       {banners.map((banner) => (
-        <p key={banner} className="text-muted-foreground">
+        // Tagged because a banner (the repository now) and a retained outcome
+        // (what an action met) can carry the same sentence.
+        <p key={banner} data-testid="vcs-banner" className="text-muted-foreground">
           {banner}
         </p>
       ))}
@@ -93,13 +112,20 @@ export function StatusLine({ status, overview, loading, loadError, jobProgress, 
           ) : null}
         </div>
       ) : status.kind === "ok" ? (
-        <p className="flex items-center gap-1.5 text-muted-foreground">
-          <Icon name="Check" className="size-3" />
-          {status.text}
-        </p>
+        <>
+          <p className="flex items-center gap-1.5 text-muted-foreground">
+            <Icon name="Check" className="size-3" />
+            {status.text}
+            {since(status.at)}
+          </p>
+          {retained(status.at) ? repoSummary : null}
+        </>
       ) : status.kind === "error" ? (
         <div className="text-destructive">
-          <p>{status.error.message}</p>
+          <p>
+            {status.error.message}
+            {since(status.at)}
+          </p>
           {status.error.hint ? <p className="text-muted-foreground">{status.error.hint}</p> : null}
           {status.error.stderr ? (
             <details className="mt-1">
@@ -109,21 +135,16 @@ export function StatusLine({ status, overview, loading, loadError, jobProgress, 
               </pre>
             </details>
           ) : null}
+          {retained(status.at) ? repoSummary : null}
         </div>
       ) : loading && overview === null ? (
         <p className="flex items-center gap-1.5 text-muted-foreground">
           <Icon name="Loading" className="size-3 animate-spin" />
           Reading repository…
         </p>
-      ) : overview ? (
-        <p className={cn("truncate text-muted-foreground")}>
-          {overview.repoName}
-          {overview.upstream
-            ? ` · ${overview.upstream.name}${overview.upstream.ahead ? ` ↑${overview.upstream.ahead}` : ""}${overview.upstream.behind ? ` ↓${overview.upstream.behind}` : ""}`
-            : " · no upstream"}
-          {loading ? " · refreshing…" : ""}
-        </p>
-      ) : null}
+      ) : (
+        repoSummary
+      )}
     </div>
   );
 }

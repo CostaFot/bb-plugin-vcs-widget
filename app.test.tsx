@@ -2,9 +2,21 @@
 import { loadPluginApp, renderSlot, type CapturedPluginApp } from "@get-bb/plugin-sdk/testing/app";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+/**
+ * Moves the wall clock forward without stopping it: the popup dates a retained
+ * outcome from `Date.now()`, and fake timers do not mix with user-event.
+ */
+function advanceClock(ms: number): void {
+  const real = Date.now.bind(Date);
+  vi.spyOn(Date, "now").mockImplementation(() => real() + ms);
+}
 import type { PluginThreadPanelProps } from "@get-bb/plugin-sdk/app";
 import type { ActionResult, ChangesResult, JobStart, LogCommit, Overview } from "./contracts";
 import type { JobKind } from "./shared/constants";
@@ -379,7 +391,7 @@ describe("BranchButton", () => {
     expect(slot.inspection.rpcCalls).toEqual([]);
   });
 
-  it("reads the repository again and forgets the last outcome when reopened", async () => {
+  it("reads the repository again and keeps a recent outcome when reopened", async () => {
     const user = userEvent.setup();
     const slot = render({
       checkout: () => ({ ok: false, error: { code: "index_locked", message: "The repository index is locked." }, overview: overview() }),
@@ -395,8 +407,51 @@ describe("BranchButton", () => {
     await user.click(slot.getByTestId("vcs-branch-button"));
     popup = await screen.findByTestId("vcs-branch-popup");
     await waitFor(() => expect(methods(slot)).toEqual(["overview", "checkout", "overview"]));
-    expect(within(popup).queryByText("The repository index is locked.")).toBeNull();
+    expect(within(popup).queryByText("The repository index is locked.")).not.toBeNull();
     expect((within(popup).getByLabelText("Search for branches and actions") as HTMLInputElement).value).toBe("");
+  });
+
+  it("dates a retained outcome and shows the repository under it", async () => {
+    const user = userEvent.setup();
+    const slot = render({
+      checkout: () => ({ ok: false, error: { code: "index_locked", message: "The repository index is locked." }, overview: overview() }),
+    });
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    let popup = await screen.findByTestId("vcs-branch-popup");
+    const [featureRow] = await within(popup).findAllByText("feature");
+    await user.click(featureRow!);
+    await within(popup).findByText("The repository index is locked.");
+    // Fresh: no age, and the outcome has the status line to itself.
+    const line = () => within(popup).getByRole("status").textContent ?? "";
+    expect(line()).not.toMatch(/ago/);
+    expect(line()).not.toMatch(/repo · origin\/main/);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("vcs-branch-popup")).toBeNull());
+
+    advanceClock(20_000);
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    popup = await screen.findByTestId("vcs-branch-popup");
+    await within(popup).findByText(/The repository index is locked\. · 20 s ago/);
+    expect(line()).toMatch(/repo · origin\/main/);
+  });
+
+  it("forgets an outcome older than the retention window", async () => {
+    const user = userEvent.setup();
+    const slot = render({
+      checkout: () => ({ ok: false, error: { code: "index_locked", message: "The repository index is locked." }, overview: overview() }),
+    });
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    let popup = await screen.findByTestId("vcs-branch-popup");
+    const [featureRow] = await within(popup).findAllByText("feature");
+    await user.click(featureRow!);
+    await within(popup).findByText("The repository index is locked.");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("vcs-branch-popup")).toBeNull());
+
+    advanceClock(61_000);
+    await user.click(slot.getByTestId("vcs-branch-button"));
+    popup = await screen.findByTestId("vcs-branch-popup");
+    await waitFor(() => expect(within(popup).queryByText(/The repository index is locked/)).toBeNull());
   });
 
   it("returns from the New Branch step on Escape instead of closing", async () => {

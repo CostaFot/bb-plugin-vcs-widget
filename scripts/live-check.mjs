@@ -44,7 +44,7 @@ if (mode === "setup") {
 }
 
 const H = await browserHelpers();
-const { THREAD, launch, label, waitLabel, openPopup, popupText, statusText, closePopup, waitStatus, waitToast, dialogCmd, dialogText, dialogButton, palette, paletteRows, clickPaletteRow, shot } = H;
+const { THREAD, launch, label, waitLabel, openPopup, popupText, statusText, bannerTexts, closePopup, waitStatus, waitToast, dialogCmd, dialogText, dialogButton, palette, paletteRows, clickPaletteRow, shot } = H;
 const { results, step, summary } = recorder();
 const TS = Date.now().toString(36);
 const LIVE = `feat/live-${TS}`;
@@ -109,8 +109,17 @@ try {
   step("S5 update without upstream -> no_upstream", /no upstream/i.test(st5), st5);
   await closePopup(page);
 
+  // COS-128: the outcome outlives the popup for a minute. Past five seconds it
+  // is dated and the repository summary joins it underneath, so the wait here
+  // is what makes the check deterministic rather than padding.
+  await sleep(6000);
   await openPopup(page);
-  step("S6pre reopen clears the last status", !/upstream branch/i.test(await statusText(page)));
+  const st6pre = await statusText(page);
+  step(
+    "S6pre reopen keeps the last outcome, dated, above the summary",
+    /upstream/i.test(st6pre) && / ago/.test(st6pre) && st6pre.split(" | ").length >= 2,
+    `status="${st6pre}"`,
+  );
   await page.click('[data-action="push"]');
   const cmd6 = await dialogCmd(page);
   await dialogButton(page, "Cancel");
@@ -159,8 +168,19 @@ try {
     if (existsSync(lock)) unlinkSync(lock);
   }
   await closePopup(page);
+  // Same six seconds. The banners live inside the status region, so reading
+  // them separately is the only way to see that the lock banner went while
+  // the last outcome stayed. The refused click itself is not one: a blocked
+  // row explains by toast and never writes the status line.
+  await sleep(6000);
   await openPopup(page);
-  step("S7b reopen refetches: lock banner and last error gone", !/lock/i.test(await statusText(page)));
+  const banners7b = await bannerTexts(page);
+  const st7b = await statusText(page);
+  step(
+    "S7b reopen refetches: the lock banner goes, the last outcome stays dated",
+    !banners7b.some((text) => /lock/i.test(text)) && / ago/.test(st7b),
+    `banners=${JSON.stringify(banners7b)} status="${st7b}"`,
+  );
   await closePopup(page);
 
   sh(`git -C ${REPO} checkout -q --detach`);
