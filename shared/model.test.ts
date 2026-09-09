@@ -10,6 +10,7 @@ import {
   discardPlans,
   entryKey,
   favouriteLabel,
+  fileMenuFor,
   stageState,
   statusLetter,
   filterAndRank,
@@ -406,6 +407,20 @@ describe("commit panel entries", () => {
     });
     expect(discardPlans(plan).map((candidate) => candidate.op)).toEqual(["restore-head", "rm-cached", "clean"]);
     expect(discardPlans({ restore: [], remove: [], clean: ["u.txt"] })).toEqual([{ op: "clean", paths: ["u.txt"] }]);
+  });
+
+  it("offers Copy Path and Discard on a row, and says why a conflict cannot be discarded", () => {
+    expect(fileMenuFor(entry("M", "."))).toEqual([
+      { id: "copy-path", label: "Copy Path", disabled: false, reason: null, separatorBefore: false },
+      { id: "discard", label: "Discard", disabled: false, reason: null, separatorBefore: true },
+    ]);
+    const onConflict = fileMenuFor(conflicted);
+    expect(onConflict.map((item) => item.disabled)).toEqual([false, true]);
+    expect(onConflict[1]!.reason).toBe("Conflicted files cannot be discarded; resolve them first.");
+    // A running action disables the discard but never the copy.
+    const busy = fileMenuFor(untracked, { blocked: "Another VCS action is still running." });
+    expect(busy.map((item) => item.disabled)).toEqual([false, true]);
+    expect(busy[1]!.reason).toBe("Another VCS action is still running.");
   });
 });
 

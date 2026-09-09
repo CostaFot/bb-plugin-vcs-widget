@@ -62,9 +62,11 @@ function setup(options: {
   environment?: Record<string, unknown> | null;
   hostResult?: (call: HostCall) => unknown;
   settings?: Record<string, string | number | boolean>;
+  send?: (args: unknown) => unknown;
 } = {}) {
   const hostCalls: HostCall[] = [];
   const subscriptions: Subscription[] = [];
+  const sends: unknown[] = [];
   const released = { count: 0 };
   const environment = options.environment === undefined ? READY_ENVIRONMENT : options.environment;
   const { bb, harness } = createFakePluginHost({
@@ -73,6 +75,10 @@ function setup(options: {
     sdk: {
       threads: {
         get: async () => ({ id: "t1", environmentId: environment?.id ?? null, environment }),
+        send: async (args: unknown) => {
+          sends.push(args);
+          return options.send ? options.send(args) : { ok: true, delivery: "sent" };
+        },
       },
       environments: {
         status: async () => ({ outcome: "available" }),
@@ -89,7 +95,7 @@ function setup(options: {
       return options.hostResult ? options.hostResult(call) : defaultHostResult(call);
     },
   });
-  return { bb, harness, hostCalls, subscriptions, released };
+  return { bb, harness, hostCalls, subscriptions, sends, released };
 }
 
 const JOB_METHODS = new Set(["fetch", "pull", "push", "updateBranch", "deleteRemoteBranch", "commit"]);
@@ -511,6 +517,34 @@ describe("server", () => {
     expect(result).toMatchObject({ isError: true });
     expect(JSON.stringify(result)).toContain("not a valid git branch name");
     expect(hostCalls).toEqual([]);
+  });
+
+  it("hands the commit to the thread's agent as an ordinary user message", async () => {
+    const { bb, harness, hostCalls, sends } = setup();
+    await plugin(bb);
+    const result = await harness.behavior.callRpc("sendToAgent", { threadId: "t1" });
+    expect(result).toEqual({ ok: true, delivery: "sent" });
+    expect(sends).toEqual([
+      {
+        threadId: "t1",
+        input: [{ type: "text", text: "LGTM - Commit", mentions: [] }],
+        mode: "queue-if-active",
+      },
+    ]);
+    // It is the one method that reaches no repository.
+    expect(hostCalls).toEqual([]);
+  });
+
+  it("reports a message the thread would not take", async () => {
+    const { bb, harness } = setup({
+      send: () => {
+        throw new Error("thread is archived");
+      },
+    });
+    await plugin(bb);
+    const result = await harness.behavior.callRpc("sendToAgent", { threadId: "t1" });
+    expect(result).toMatchObject({ ok: false, error: { code: "git_failed" } });
+    expect(JSON.stringify(result)).toContain("thread is archived");
   });
 
   it("disposes timers and the subscription cleanly", async () => {

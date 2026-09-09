@@ -22,7 +22,7 @@ import type {
 } from "../contracts";
 import type { rpcContract } from "../server";
 import { isValidRemoteName } from "../shared/branch-name";
-import { isPullStrategy, type PullStrategy } from "../shared/constants";
+import { fitsPathList, isPullStrategy, type PullStrategy } from "../shared/constants";
 import {
   RESET_OPTIONS,
   confirmTierFor,
@@ -135,6 +135,15 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
       }
     },
     [applyOverview, onCheckedOut, quiet],
+  );
+
+  /** An action the app refused before any call: reported like a failed one. */
+  const refuse = useCallback(
+    (error: GitError) => {
+      setStatus({ kind: "error", error });
+      if (!quiet) toast.error(error.message);
+    },
+    [quiet],
   );
 
   const execute = useCallback(
@@ -545,7 +554,20 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
       const plan = discardPlanFor(entries);
       const plans = discardPlans(plan);
       if (plans.length === 0) {
-        toast.error(plan.skipped.length > 0 ? "Conflicted files cannot be discarded; resolve them first." : "Nothing to discard.");
+        refuse({
+          code: "git_failed",
+          message: plan.skipped.length > 0 ? "Conflicted files cannot be discarded; resolve them first." : "Nothing to discard.",
+        });
+        return;
+      }
+      // The paths travel on argv, and a whole group can outgrow one call. The
+      // contract would reject it; saying so here names the way out.
+      if (![plan.restore, plan.remove, plan.clean].every(fitsPathList)) {
+        refuse({
+          code: "git_failed",
+          message: "Too many files for one discard.",
+          hint: "Discard them in smaller groups.",
+        });
         return;
       }
       const total = plan.restore.length + plan.remove.length + plan.clean.length;
@@ -569,7 +591,7 @@ export function useVcsActions({ threadId, overview, applyOverview, onCheckedOut,
         },
       );
     },
-    [execute, requestOrRun, rpc, threadId],
+    [execute, refuse, requestOrRun, rpc, threadId],
   );
 
   /**

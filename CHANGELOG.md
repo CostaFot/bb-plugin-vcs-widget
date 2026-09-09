@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 (2026-09-09)
+
+Three things the commit panel was missing.
+
+- Right-click a file row for Copy Path and Discard. Copy Path copies the
+  repository-relative path the row shows (a rename copies the new one);
+  Discard is the row's hover button by another name, and it says why a
+  conflicted file cannot be discarded instead of hiding the row.
+- A Discard button on the Changes and Unversioned files headers, VS Code's
+  "Discard All Changes": one confirm dialog listing every command by
+  category, one call. Conflicts has no button, because a conflicted file
+  cannot be discarded. A group whose paths would outgrow one call is refused
+  before the dialog, with the reason, rather than failing validation.
+- "LGTM - Commit" next to Commit and Commit and Push: it sends that text to
+  the agent in this thread as if you had typed it, and the agent writes the
+  message and commits. Always enabled — whatever is staged, whatever the
+  agent is doing. A click during a running turn queues behind it
+  (`queue-if-active`) and the panel says so. It is the only RPC method in
+  the plugin that runs no git; it is logged with its thread id like every
+  mutation (README, "Safety model").
+
 ## 0.5.0 (2026-09-09) — milestone 5
 
 Renamed, and the last surfaces: a settings page of its own, and a read-only

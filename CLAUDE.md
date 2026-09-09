@@ -17,7 +17,13 @@ comments (`claude: step N done, <what>`), never in files here.
 - COS-124 Milestone 4: own git log panel — shipped 2026-09-09
 - COS-125 Milestone 5: settings sections, read-only CLI and agent tool, skill,
   compact pass, README screenshots — shipped 2026-09-09
+- COS-131 to COS-133 commit panel: discard a whole group from its header,
+  a right-click menu on the file rows (Copy Path, Discard), and an
+  "LGTM - Commit" button that hands the commit to the thread's agent —
+  shipped 2026-09-09
 - COS-130 marketplace submission — open, and only on Costa's word
+- COS-142 hand-check the clipboard copies in a real browser (headless
+  Chromium denies the write, so no script can)
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
@@ -59,6 +65,9 @@ app.tsx (browser) --useRpc(rpcContract, keyed by threadId)--> server.ts (bb serv
   kv (`fav:<hostId>:<repoRoot>`; the settings page lists and clears them
   through `favouriteRepos` / `clearFavourites`, which rebuild the key from
   `hostId` and `repoRoot` so a caller never names a storage key).
+  `sendToAgent` is the one method that runs no git: it hands the commit to
+  the thread's agent through `bb.sdk.threads.send` (`queue-if-active`, the
+  text in `AGENT_COMMIT_MESSAGE`), and it is logged like a mutation.
 - `server/cli.ts` is the whole read-only surface: argv parsing, the text and
   `--json` shapes, and a `CliReader` with exactly two methods (overview,
   log). `bb.cli.register` and `bb.agents.registerTool("vcs_widget_status")`
@@ -72,7 +81,8 @@ app.tsx (browser) --useRpc(rpcContract, keyed by threadId)--> server.ts (bb serv
   (`views/SettingsSections.tsx`) and `commandPaletteAction` rows;
   the popup is a portalled Popover + cmdk Command
   with plugin-owned ranking (`shared/model.ts`, `menuFor` for the branch
-  context menu, `commitMenuFor` for the log's). Palette rows hand their
+  context menu, `commitMenuFor` for the log's, `fileMenuFor` for the commit
+  panel's file rows). Palette rows hand their
   request to the button through
   `lib/events.ts` module scope, never through an event `detail`. Jobs are
   awaited in `hooks/use-jobs.ts` (realtime `job` channel, `jobGet` polling
@@ -99,8 +109,10 @@ bb plugin reload vcs-widget   # after `bb plugin build` without `dev`
 
 Live click-through: `docs/VERIFY.md`, driven by `scripts/live-check.mjs`
 (M1), `scripts/live-check-m2.mjs` (M2), `scripts/live-check-m3.mjs` (M3),
-`scripts/live-check-m4.mjs` (M4) and `scripts/live-check-m5.mjs` (M5: the
-CLI, the settings sections, a 390 px pass) on `scripts/live-lib.mjs` (system
+`scripts/live-check-m4.mjs` (M4), `scripts/live-check-m5.mjs` (M5: the
+CLI, the settings sections, a 390 px pass) and `scripts/live-check-m6.mjs`
+(the commit panel's file menu, group discard and LGTM - Commit, which sends
+a real message to the thread) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
 unique per run, the scratch repo is reused). `scripts/screenshots.mjs`
 regenerates `docs/screenshots/*.png` for the README; with no repository

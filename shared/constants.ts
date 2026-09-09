@@ -38,6 +38,20 @@ export const JOB_TIMEOUT_SECONDS = { default: 600, min: 30, max: 3600 } as const
 /** Paths per stage / unstage / discard call, and the bytes they may add up to (argv, not stdin). */
 export const MAX_PATHS_PER_CALL = 500;
 export const MAX_PATH_BYTES_PER_CALL = 256 * 1024;
+
+/** What one path list costs on argv: the path plus its NUL separator. */
+export function pathListBytes(paths: readonly string[]): number {
+  return paths.reduce((total, path) => total + path.length + 1, 0);
+}
+
+/**
+ * Whether a path list fits one call, by the same two caps the contract
+ * enforces. The app asks before it offers a whole-group action, so a discard
+ * of hundreds of long paths says so instead of failing validation.
+ */
+export function fitsPathList(paths: readonly string[]): boolean {
+  return paths.length <= MAX_PATHS_PER_CALL && pathListBytes(paths) <= MAX_PATH_BYTES_PER_CALL;
+}
 /** A commit message travels as one RPC string and then on git's stdin. */
 export const MAX_COMMIT_MESSAGE_BYTES = 64 * 1024;
 /** Changed files listed by the commit panel. */
@@ -59,6 +73,14 @@ export type ResetMode = (typeof RESET_MODES)[number];
 /** Which side of a change a file diff shows: HEAD → index, or index → working tree. */
 export const DIFF_SIDES = ["index", "worktree"] as const;
 export type DiffSide = (typeof DIFF_SIDES)[number];
+
+/**
+ * What the commit panel's "LGTM - Commit" button sends to the thread's agent,
+ * as if the human had typed it. Fixed text: the button is the whole of what
+ * the plugin can say, and a repository that needs other words is a setting
+ * for later.
+ */
+export const AGENT_COMMIT_MESSAGE = "LGTM - Commit";
 
 /** `git switch` and `--end-of-options` arrived in 2.24. */
 export const MIN_GIT_VERSION = { major: 2, minor: 24 } as const;

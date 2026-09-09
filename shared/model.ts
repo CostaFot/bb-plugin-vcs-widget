@@ -839,6 +839,36 @@ export function commitMenuFor(commit: LogCommit, overview: Overview): CommitMenu
 }
 
 // ---------------------------------------------------------------------------
+// Commit panel: the file row's context menu
+// ---------------------------------------------------------------------------
+
+export type FileMenuItemId = "copy-path" | "discard";
+
+export interface FileMenuItem {
+  id: FileMenuItemId;
+  label: string;
+  disabled: boolean;
+  reason: string | null;
+  separatorBefore: boolean;
+}
+
+/**
+ * The context menu for one commit panel row. Copy Path copies `entry.path`,
+ * the repository-relative path the row shows, which for a rename is the new
+ * one; Discard is the same call the row's hover button makes, so a conflicted
+ * entry gives the reason it cannot run rather than disappearing.
+ */
+export function fileMenuFor(entry: ChangeEntry, options: { blocked?: string | null } = {}): FileMenuItem[] {
+  const blocked = options.blocked ?? null;
+  const conflicted = entry.kind === "conflicted" ? "Conflicted files cannot be discarded; resolve them first." : null;
+  const discardReason = conflicted ?? blocked;
+  return [
+    { id: "copy-path", label: "Copy Path", disabled: false, reason: null, separatorBefore: false },
+    { id: "discard", label: "Discard", disabled: discardReason !== null, reason: discardReason, separatorBefore: true },
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Confirm tiers
 // ---------------------------------------------------------------------------
 

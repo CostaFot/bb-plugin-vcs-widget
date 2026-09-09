@@ -201,6 +201,7 @@ function render(options: {
         cherryPick: () => ({ ok: true, message: "Cherry-picked.", overview: view }),
         revert: () => ({ ok: true, message: "Reverted.", overview: view }),
         resetTo: () => ({ ok: true, message: "Reset.", overview: view }),
+        sendToAgent: () => ({ ok: true, delivery: "sent" }),
         ...options.rpc,
       },
     },
@@ -798,6 +799,95 @@ describe("CommitPanel", () => {
     expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git --literal-pathspecs restore --staged --worktree --source=HEAD -- staged.txt");
     await user.click(screen.getByText("Discard", { selector: "button" }));
     await waitFor(() => expect(calls(slot, "discard")).toEqual([{ threadId: "t1", restore: ["staged.txt"], remove: [], clean: [] }]));
+  });
+
+  /** Right-clicks a file row and returns its menu. */
+  async function openFileMenu(slot: { getByText: (text: string) => HTMLElement }, path: string) {
+    const row = slot.getByText(path).closest("[data-path]");
+    if (!(row instanceof HTMLElement)) throw new Error(`no row for ${path}`);
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    return screen.findByTestId("vcs-file-menu");
+  }
+
+  it("right-clicks a file for Copy Path and Discard", async () => {
+    const user = userEvent.setup();
+    const copied: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (text: string) => { copied.push(text); return Promise.resolve(); } },
+    });
+    const slot = renderCommitPanel();
+    await slot.findByText("staged.txt");
+    const menu = await openFileMenu(slot, "staged.txt");
+    expect(Array.from(menu.querySelectorAll("[role=menuitem]")).map((item) => item.textContent)).toEqual(["Copy Path", "Discard"]);
+    await user.click(within(menu).getByText("Copy Path"));
+    await waitFor(() => expect(copied).toEqual(["staged.txt"]));
+    expect(slot.getByTestId("vcs-commit-notice").textContent).toContain("Copied staged.txt");
+    // The menu item is the row's discard button by another name.
+    const untracked = await openFileMenu(slot, "new.txt");
+    await user.click(within(untracked).getByText("Discard"));
+    expect((await screen.findByTestId("vcs-command-preview")).textContent).toBe("git --literal-pathspecs clean -f -- new.txt");
+    await user.click(screen.getByText("Discard", { selector: "button" }));
+    await waitFor(() => expect(calls(slot, "discard")).toEqual([{ threadId: "t1", restore: [], remove: [], clean: ["new.txt"] }]));
+  });
+
+  it("discards a whole group from its header, and leaves Conflicts without the button", async () => {
+    const user = userEvent.setup();
+    const conflicted = { path: "clash.txt", oldPath: null, index: "U", worktree: "U", kind: "conflicted" as const };
+    const slot = renderCommitPanel({ changes: { ...CHANGES, files: [...CHANGES.files, conflicted] } });
+    await slot.findByText("staged.txt");
+    expect(slot.queryByLabelText("Discard all changes in Conflicts")).toBeNull();
+    await user.click(slot.getByLabelText("Discard all changes in Changes"));
+    expect(await screen.findByText("Discard changes in 3 files")).toBeTruthy();
+    expect(screen.getByTestId("vcs-command-preview").textContent).toBe(
+      "git --literal-pathspecs restore --staged --worktree --source=HEAD -- staged.txt edited.txt both.txt",
+    );
+    await user.click(screen.getByText("Discard", { selector: "button" }));
+    await waitFor(() =>
+      expect(calls(slot, "discard")).toEqual([{ threadId: "t1", restore: ["staged.txt", "edited.txt", "both.txt"], remove: [], clean: [] }]),
+    );
+  });
+
+  it("refuses a group discard whose paths would not fit one call", async () => {
+    const user = userEvent.setup();
+    const files = Array.from({ length: 100 }, (_, index) => ({
+      path: `${"d".repeat(3000)}/${index}.txt`,
+      oldPath: null,
+      index: ".",
+      worktree: "M",
+      kind: "tracked" as const,
+    }));
+    const slot = renderCommitPanel({ changes: { ...CHANGES, files } });
+    await slot.findByLabelText("Discard all changes in Changes");
+    await user.click(slot.getByLabelText("Discard all changes in Changes"));
+    expect(await slot.findByText("Too many files for one discard.")).toBeTruthy();
+    expect(slot.getByText("Discard them in smaller groups.")).toBeTruthy();
+    expect(screen.queryByTestId("vcs-command-preview")).toBeNull();
+    expect(calls(slot, "discard")).toEqual([]);
+  });
+
+  it("hands the commit to the thread's agent whatever is staged", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel({ rpc: { sendToAgent: () => ({ ok: true, delivery: "queued" }) } });
+    await slot.findByText("staged.txt");
+    const button = slot.getByTestId("vcs-agent-commit-button") as HTMLButtonElement;
+    expect(button.textContent).toBe("LGTM - Commit");
+    // Commit itself is refused without a message; this one never is.
+    expect((slot.getByTestId("vcs-commit-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(button.disabled).toBe(false);
+    await user.click(button);
+    await waitFor(() => expect(calls(slot, "sendToAgent")).toEqual([{ threadId: "t1" }]));
+    expect((await slot.findByTestId("vcs-commit-notice")).textContent).toContain("queued");
+  });
+
+  it("reports an agent that could not be reached", async () => {
+    const user = userEvent.setup();
+    const slot = renderCommitPanel({
+      rpc: { sendToAgent: () => ({ ok: false, error: { code: "git_failed", message: "The message did not reach the agent: no such thread" } }) },
+    });
+    await slot.findByText("staged.txt");
+    await user.click(slot.getByTestId("vcs-agent-commit-button"));
+    expect((await slot.findByTestId("vcs-commit-notice")).textContent).toContain("did not reach the agent");
   });
 
   it("Commit and Push follows the commit with the push dialog on the overview the commit reported", async () => {

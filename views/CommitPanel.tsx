@@ -3,7 +3,7 @@
 // the selected file, the message, and Commit / Commit and Push. Every
 // mutation goes through useVcsActions, so discards and amends ask first with
 // the exact command and the commit runs as a job on the host.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { experimental_Diff as Diff, useRpc } from "@get-bb/plugin-sdk/app";
 import type { ChangeEntry, FileDiff } from "../contracts";
 import { useChanges } from "../hooks/use-changes";
@@ -13,11 +13,27 @@ import { useSidebarThread } from "../hooks/use-sidebar-thread";
 import { useVcsActions } from "../hooks/use-vcs-actions";
 import { errorMessage } from "../lib/errors";
 import type { rpcContract } from "../server";
-import type { DiffSide } from "../shared/constants";
-import { commitBlockedReason, diffSidesFor, headLabel, isStaged, stageState, statusLetter } from "../shared/model";
+import { AGENT_COMMIT_MESSAGE, type DiffSide } from "../shared/constants";
+import {
+  commitBlockedReason,
+  diffSidesFor,
+  fileMenuFor,
+  headLabel,
+  isStaged,
+  stageState,
+  statusLetter,
+  type FileMenuItemId,
+} from "../shared/model";
 import { ConfirmStep } from "./ConfirmStep";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Icon } from "@/components/ui/icon";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -55,50 +71,71 @@ interface RowProps {
   onToggle: (entry: ChangeEntry) => void;
   onSelect: (entry: ChangeEntry) => void;
   onDiscard: (entry: ChangeEntry) => void;
+  onMenu: (itemId: FileMenuItemId, entry: ChangeEntry) => void;
 }
 
-function Row({ entry, selected, disabled, onToggle, onSelect, onDiscard }: RowProps) {
+function Row({ entry, selected, disabled, onToggle, onSelect, onDiscard, onMenu }: RowProps) {
   const state = stageState(entry);
   const letter = statusLetter(entry);
   const conflicted = entry.kind === "conflicted";
+  const items = fileMenuFor(entry, { blocked: disabled ? "Another VCS action is still running." : null });
   return (
-    <li
-      className={cn("group flex items-center gap-2 px-2 py-0.5 text-xs hover:bg-accent", selected && "bg-accent")}
-      data-path={entry.path}
-      data-stage={state}
-    >
-      <Checkbox
-        checked={conflicted ? false : state === "staged" ? true : state === "partial" ? "indeterminate" : false}
-        aria-label={conflicted ? `Mark ${entry.path} resolved` : state === "unstaged" ? `Stage ${entry.path}` : `Unstage ${entry.path}`}
-        disabled={disabled}
-        onCheckedChange={() => onToggle(entry)}
-      />
-      <button
-        type="button"
-        className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
-        aria-pressed={selected}
-        onClick={() => onSelect(entry)}
-        title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
-      >
-        <span className={cn("w-3 shrink-0 text-center font-mono font-semibold", LETTER_CLASS[letter] ?? "")} aria-label={`status ${letter}`}>
-          {letter}
-        </span>
-        <span className={cn("min-w-0 flex-1 truncate", state === "partial" && "italic")}>
-          {entry.oldPath ? <span className="text-muted-foreground">{entry.oldPath} → </span> : null}
-          {entry.path}
-        </span>
-      </button>
-      <button
-        type="button"
-        aria-label={`Discard changes in ${entry.path}`}
-        title={conflicted ? "Resolve the conflict first." : entry.kind === "untracked" ? "Delete the file" : "Revert to HEAD"}
-        disabled={disabled || conflicted}
-        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-hover:opacity-100"
-        onClick={() => onDiscard(entry)}
-      >
-        <Icon name="RotateCcw" className="size-3.5" />
-      </button>
-    </li>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <li
+          className={cn("group flex items-center gap-2 px-2 py-0.5 text-xs hover:bg-accent", selected && "bg-accent")}
+          data-path={entry.path}
+          data-stage={state}
+        >
+          <Checkbox
+            checked={conflicted ? false : state === "staged" ? true : state === "partial" ? "indeterminate" : false}
+            aria-label={conflicted ? `Mark ${entry.path} resolved` : state === "unstaged" ? `Stage ${entry.path}` : `Unstage ${entry.path}`}
+            disabled={disabled}
+            onCheckedChange={() => onToggle(entry)}
+          />
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left"
+            aria-pressed={selected}
+            onClick={() => onSelect(entry)}
+            title={entry.oldPath ? `${entry.oldPath} → ${entry.path}` : entry.path}
+          >
+            <span className={cn("w-3 shrink-0 text-center font-mono font-semibold", LETTER_CLASS[letter] ?? "")} aria-label={`status ${letter}`}>
+              {letter}
+            </span>
+            <span className={cn("min-w-0 flex-1 truncate", state === "partial" && "italic")}>
+              {entry.oldPath ? <span className="text-muted-foreground">{entry.oldPath} → </span> : null}
+              {entry.path}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label={`Discard changes in ${entry.path}`}
+            title={conflicted ? "Resolve the conflict first." : entry.kind === "untracked" ? "Delete the file" : "Revert to HEAD"}
+            disabled={disabled || conflicted}
+            className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-hover:opacity-100"
+            onClick={() => onDiscard(entry)}
+          >
+            <Icon name="RotateCcw" className="size-3.5" />
+          </button>
+        </li>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="min-w-48" data-testid="vcs-file-menu" data-path={entry.path}>
+        {items.map((item) => (
+          <Fragment key={item.id}>
+            {item.separatorBefore ? <ContextMenuSeparator /> : null}
+            <ContextMenuItem
+              disabled={item.disabled}
+              title={item.reason ?? undefined}
+              onSelect={() => onMenu(item.id, entry)}
+              data-menu-id={item.id}
+            >
+              {item.label}
+            </ContextMenuItem>
+          </Fragment>
+        ))}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -112,15 +149,19 @@ interface GroupProps {
   onToggle: (entry: ChangeEntry) => void;
   onSelect: (entry: ChangeEntry) => void;
   onDiscard: (entry: ChangeEntry) => void;
+  onMenu: (itemId: FileMenuItemId, entry: ChangeEntry) => void;
+  /** Header discard, VS Code's "Discard All Changes"; null where nothing can be discarded. */
+  onDiscardAll: ((entries: ChangeEntry[]) => void) | null;
 }
 
-function Group({ title, entries, selected, disabled, onToggleAll, onToggle, onSelect, onDiscard }: GroupProps) {
+function Group({ title, entries, selected, disabled, onToggleAll, onToggle, onSelect, onDiscard, onMenu, onDiscardAll }: GroupProps) {
   if (entries.length === 0) return null;
   const allStaged = entries.every((entry) => stageState(entry) === "staged");
   const noneStaged = entries.every((entry) => stageState(entry) === "unstaged");
+  const allUntracked = entries.every((entry) => entry.kind === "untracked");
   return (
     <section aria-label={title}>
-      <header className="flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+      <header className="group/header flex items-center gap-2 px-2 py-1 text-[11px] font-medium text-muted-foreground">
         <Checkbox
           checked={allStaged ? true : noneStaged ? false : "indeterminate"}
           aria-label={allStaged ? `Unstage all in ${title}` : `Stage all in ${title}`}
@@ -129,6 +170,18 @@ function Group({ title, entries, selected, disabled, onToggleAll, onToggle, onSe
         />
         <span>{title}</span>
         <span className="tabular-nums">({entries.length})</span>
+        {onDiscardAll !== null ? (
+          <button
+            type="button"
+            aria-label={`Discard all changes in ${title}`}
+            title={allUntracked ? "Delete every file git does not track here" : "Revert every file here to HEAD"}
+            disabled={disabled}
+            className="ml-auto rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 disabled:opacity-0 group-hover/header:opacity-100"
+            onClick={() => onDiscardAll(entries)}
+          >
+            <Icon name="RotateCcw" className="size-3.5" />
+          </button>
+        ) : null}
       </header>
       <ul>
         {entries.map((entry) => (
@@ -140,6 +193,7 @@ function Group({ title, entries, selected, disabled, onToggleAll, onToggle, onSe
             onToggle={onToggle}
             onSelect={onSelect}
             onDiscard={onDiscard}
+            onMenu={onMenu}
           />
         ))}
       </ul>
@@ -182,6 +236,11 @@ export function CommitPanel({ threadId }: PanelProps) {
   const [diff, setDiff] = useState<FileDiff | "loading" | null>(null);
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
+  // What the two things that are not git actions report: the copied path and
+  // the message handed to the agent. The action status line below is
+  // `actions.status`, and neither of these produces one.
+  const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [sending, setSending] = useState(false);
   const [signoff, setSignoff] = useState(false);
   const [runHooks, setRunHooks] = useState(true);
   // The message Amend filled in, so turning it off can clear it again.
@@ -248,6 +307,68 @@ export function CommitPanel({ threadId }: PanelProps) {
     },
     [actions],
   );
+
+  const discardOne = useCallback(
+    (target: ChangeEntry) => {
+      setNotice(null);
+      actions.discard([target]);
+    },
+    [actions],
+  );
+
+  /** VS Code's "Discard All Changes": one dialog, one call, the whole group. */
+  const discardAll = useCallback(
+    (entries: ChangeEntry[]) => {
+      setNotice(null);
+      actions.discard(entries);
+    },
+    [actions],
+  );
+
+  const onFileMenu = useCallback(
+    (itemId: FileMenuItemId, target: ChangeEntry) => {
+      if (itemId === "discard") {
+        discardOne(target);
+        return;
+      }
+      // The row shows the repository-relative path, so that is what it copies;
+      // a rename copies the new path, the one it lives at now.
+      void navigator.clipboard?.writeText(target.path).then(
+        () => setNotice({ kind: "ok", text: `Copied ${target.path}` }),
+        () => setNotice({ kind: "error", text: "Could not copy the path." }),
+      );
+    },
+    [discardOne],
+  );
+
+  /**
+   * Hands the commit to the agent in this thread. Always available: the human
+   * has read the diff here, and whether the agent is mid-turn is the server's
+   * problem (it queues).
+   */
+  const askAgent = useCallback(async () => {
+    setSending(true);
+    setNotice(null);
+    actions.clearStatus();
+    try {
+      const result = await rpc.call("sendToAgent", { threadId });
+      setNotice(
+        result.ok
+          ? {
+              kind: "ok",
+              text:
+                result.delivery === "queued"
+                  ? `“${AGENT_COMMIT_MESSAGE}” is queued; the agent commits when the current turn ends.`
+                  : `“${AGENT_COMMIT_MESSAGE}” sent to the agent.`,
+            }
+          : { kind: "error", text: result.error.message },
+      );
+    } catch (cause) {
+      setNotice({ kind: "error", text: errorMessage(cause) });
+    } finally {
+      setSending(false);
+    }
+  }, [actions, rpc, threadId]);
 
   const toggleAmend = (on: boolean) => {
     setAmend(on);
@@ -316,9 +437,9 @@ export function CommitPanel({ threadId }: PanelProps) {
           <Empty>Nothing to commit: the working tree is clean.</Empty>
         ) : (
           <>
-            <Group title="Conflicts" entries={groups.conflicts} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={(target) => actions.discard([target])} />
-            <Group title="Changes" entries={groups.changes} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={(target) => actions.discard([target])} />
-            <Group title="Unversioned files" entries={groups.untracked} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={(target) => actions.discard([target])} />
+            <Group title="Conflicts" entries={groups.conflicts} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={discardOne} onMenu={onFileMenu} onDiscardAll={null} />
+            <Group title="Changes" entries={groups.changes} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={discardOne} onMenu={onFileMenu} onDiscardAll={discardAll} />
+            <Group title="Unversioned files" entries={groups.untracked} selected={selected} disabled={busy} onToggleAll={toggleAll} onToggle={toggle} onSelect={(next) => setSelected(next.path)} onDiscard={discardOne} onMenu={onFileMenu} onDiscardAll={discardAll} />
             {changes.truncated ? <p className="px-2 py-1 text-xs text-muted-foreground">Only the first {files.length} files are listed.</p> : null}
           </>
         )}
@@ -384,6 +505,17 @@ export function CommitPanel({ threadId }: PanelProps) {
           <Button type="button" size="sm" variant="outline" disabled={!canPush} onClick={() => submit(true)} data-testid="vcs-commit-push-button">
             {amend ? "Amend and Push" : "Commit and Push"}
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            aria-label={`${AGENT_COMMIT_MESSAGE}: hand the commit to the agent in this thread`}
+            disabled={sending}
+            onClick={() => void askAgent()}
+            data-testid="vcs-agent-commit-button"
+          >
+            {AGENT_COMMIT_MESSAGE}
+          </Button>
           {progress !== null && busy ? (
             <Button type="button" size="sm" variant="outline" className="ml-auto h-7 px-2 text-xs" onClick={() => void jobs.cancel(progress.jobId)}>
               Cancel
@@ -423,6 +555,12 @@ export function CommitPanel({ threadId }: PanelProps) {
                 </details>
               ) : null}
             </div>
+          ) : null}
+          {notice !== null ? (
+            <p className={cn("flex items-center gap-1.5", notice.kind === "error" ? "text-destructive" : "text-muted-foreground")} data-testid="vcs-commit-notice">
+              {notice.kind === "ok" ? <Icon name="Check" className="size-3 shrink-0" /> : null}
+              <span className="min-w-0 flex-1">{notice.text}</span>
+            </p>
           ) : null}
         </div>
       </form>

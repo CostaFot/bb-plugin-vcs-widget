@@ -18,6 +18,7 @@ import {
 } from "./contracts";
 import { MAX_BRANCH_NAME_LENGTH, isValidRemoteName } from "./shared/branch-name";
 import {
+  AGENT_COMMIT_MESSAGE,
   CHANGED_CHANNEL,
   JOB_CHANNEL,
   JOB_TIMEOUT_SECONDS,
@@ -488,6 +489,36 @@ export default async function plugin(bb: BbPluginApi) {
       return withJobTarget(threadId, "commit", (repo, timeoutMs) =>
         host.call("commit", { repoPath: repo.repoPath, ...input, timeoutMs }, { hostId: repo.hostId }),
       );
+    },
+
+    /**
+     * The one method that touches no repository: it hands the commit to the
+     * agent in this thread. `queue-if-active` is what bb's own composer uses,
+     * so a click during a running turn waits behind it instead of steering
+     * it, and the input carries no `visibility`, which is what makes it an
+     * ordinary user message in the transcript.
+     */
+    async sendToAgent({ threadId }) {
+      bb.log.info(`agent commit requested for thread ${threadId}`);
+      try {
+        const sent = await bb.sdk.threads.send({
+          threadId,
+          input: [{ type: "text", text: AGENT_COMMIT_MESSAGE, mentions: [] }],
+          mode: "queue-if-active",
+        });
+        return { ok: true as const, delivery: sent.delivery };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        bb.log.warn(`agent commit for thread ${threadId} was not delivered: ${message}`);
+        return {
+          ok: false as const,
+          error: {
+            code: "git_failed" as const,
+            message: `The message did not reach the agent: ${message}`,
+            hint: "Type it in the composer instead.",
+          },
+        };
+      }
     },
 
     async favourites({ threadId }) {

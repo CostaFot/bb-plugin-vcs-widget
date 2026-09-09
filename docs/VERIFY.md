@@ -5,8 +5,10 @@ with a bare origin (including jobs, deadline, cancel and process-group kill,
 the file watch through the harness), the server against bb's fake plugin
 host, and the app under jsdom. This document is the click-through against a
 running bb: `scripts/live-check.mjs` for milestone 1, `scripts/live-check-m2.mjs`
-for milestone 2, `scripts/live-check-m3.mjs` for milestone 3 and
-`scripts/live-check-m4.mjs` for milestone 4, all on `scripts/live-lib.mjs`.
+for milestone 2, `scripts/live-check-m3.mjs` for milestone 3,
+`scripts/live-check-m4.mjs` for milestone 4, `scripts/live-check-m5.mjs` for
+milestone 5 and `scripts/live-check-m6.mjs` for the commit panel's later
+additions, all on `scripts/live-lib.mjs`.
 
 ## Setup
 
@@ -42,7 +44,13 @@ VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m4.mjs /tmp/vcs-scratch
 VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
   node scripts/live-check-m5.mjs /tmp/vcs-scratch
+VCS_E2E_THREAD=thr_xxx VCS_E2E_PROJECT=proj_xxx \
+  node scripts/live-check-m6.mjs /tmp/vcs-scratch
 ```
+
+Milestone 6 sends a real "LGTM - Commit" to `VCS_E2E_THREAD`, which starts a
+turn on the scratch repository. It runs last, after the tree is clean, so the
+agent it wakes has nothing to commit.
 
 Milestone 5 also needs `bb` on `PATH`: it runs the plugin's own command
 against `VCS_E2E_THREAD` and compares the output with git in the scratch
@@ -235,6 +243,39 @@ Manual, on top of the script:
     `agent-tool` capabilities: a rejected tool registration would say so
     there.
 
+## Commit panel additions (`live-check-m6.mjs`)
+
+1. The panel lists two tracked edits under Changes and one new file under
+   Unversioned files.
+2. Right-clicking a file row opens a menu of exactly Copy Path and Discard.
+3. Copy Path runs and the panel reports the outcome. Headless Chromium
+   denies `clipboard-write` whatever `overridePermissions` says — a plain
+   button in the same page fails identically and
+   `navigator.permissions.query({name:"clipboard-write"})` answers `denied`
+   — so the script accepts "Could not copy the path." there. The successful
+   copy is scenario 8 below, by hand.
+4. Discard from the menu previews `git --literal-pathspecs clean -f -- <file>`,
+   the dialog says "delete 1 file", and the file is gone from disk after it.
+5. Only Changes and Unversioned files carry the header's Discard button;
+   Conflicts does not.
+6. The Changes header discards the whole group in one dialog: title
+   "Discard changes in 2 files", one
+   `git --literal-pathspecs restore --staged --worktree --source=HEAD --`
+   naming both paths, and `git status --porcelain` is empty afterwards.
+7. "LGTM - Commit" is enabled with nothing staged and no message; clicking
+   it puts a User message reading "LGTM - Commit" in the thread's event log
+   (`bb thread log`), and the panel says it was sent or queued.
+
+Manual, on top of the script:
+
+8. Copy Path in a real browser window pastes the repository-relative path,
+   and the panel says "Copied <path>" (COS-142).
+9. A group whose paths would outgrow one call (500 files, or long paths over
+   256 KB of argv) is refused before the dialog with "Too many files for one
+   discard."
+10. Clicking "LGTM - Commit" while the agent is mid-turn says the message is
+    queued, and the agent takes it when the turn ends.
+
 ## Last run
 
 2026-09-09, bb 0.42.1, git 2.55, one local machine: milestone 1 scenarios
@@ -244,6 +285,16 @@ milestone 5 scenarios 1 to 14 pass headlessly (see the COS-121 to COS-125
 comments). Scenario 13 of milestone 1 waits for a remote machine (COS-126).
 The milestone 1 push step once failed to reopen the popup after a cancelled
 dialog and passed on the rerun (COS-127).
+
+The commit panel additions (six scenarios) pass headlessly on the same
+machine, 2026-09-09, and milestone 3 was rerun whole against the restructured
+file row: 16 of 16. Scenario 3 found that Copy Path cannot be verified
+headlessly at all: Chromium denies the clipboard write to any page in that
+mode, the plugin's own code is not involved, and the same limit applies to
+Copy Branch Name and Copy Revision Number, which no script covers either.
+Scenario 7 first looked for the message in `bb thread history`, which
+collapses identical prompts, so a second run saw no new message; it reads the
+thread's event log now.
 
 Milestone 5's first run failed on the settings page because it looked for it
 at `/extensions/plugins/<id>`, which is the marketplace page; the plugin's

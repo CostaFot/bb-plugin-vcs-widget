@@ -19,6 +19,7 @@ import {
   MAX_PATH_BYTES_PER_CALL,
   PULL_STRATEGIES,
   RESET_MODES,
+  pathListBytes,
 } from "./shared/constants";
 import {
   MAX_BRANCH_NAME_LENGTH,
@@ -219,6 +220,16 @@ export const actionResultSchema = z.union([
 ]);
 
 const failure = z.object({ ok: z.literal(false), error: gitErrorSchema }).strict();
+
+/**
+ * Answer to handing the commit to the thread's agent: `sent` started a turn,
+ * `queued` waits behind the one already running. Not an `ActionResult`: no
+ * git ran, so there is no overview to apply.
+ */
+export const agentMessageResultSchema = z.union([
+  z.object({ ok: z.literal(true), delivery: z.enum(["sent", "queued"]) }).strict(),
+  failure,
+]);
 
 // ---------------------------------------------------------------------------
 // Jobs: network operations that outlive one host call.
@@ -520,8 +531,7 @@ const updateBranchFields = { branch: branchNameSchema };
 const deleteRemoteBranchFields = { remote: remoteNameSchema, branch: branchNameSchema };
 const jobFields = { jobId: z.string().min(1).max(128) };
 
-const pathBytes = (paths: readonly string[]) => paths.reduce((total, path) => total + path.length + 1, 0);
-const withinArgv = (paths: readonly string[]) => pathBytes(paths) <= MAX_PATH_BYTES_PER_CALL;
+const withinArgv = (paths: readonly string[]) => pathListBytes(paths) <= MAX_PATH_BYTES_PER_CALL;
 
 /** Paths for one `git add` / `reset` / `restore`: they travel on argv, so they are capped. */
 export const pathListSchema = z
@@ -737,6 +747,15 @@ export const rpcContract = defineRpcContract({
     input: threadInput.extend(commitFields).strict(),
     output: jobStartSchema,
   },
+  /**
+   * Hands the commit to the agent in this thread by sending it the fixed
+   * "LGTM - Commit" text as an ordinary user message. The one method here
+   * that runs no git.
+   */
+  sendToAgent: {
+    input: threadInput.strict(),
+    output: agentMessageResultSchema,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -906,6 +925,7 @@ export type Overview = z.infer<typeof overviewSchema>;
 export type GitErrorCode = z.infer<typeof gitErrorCodeSchema>;
 export type GitError = z.infer<typeof gitErrorSchema>;
 export type ActionResult = z.infer<typeof actionResultSchema>;
+export type AgentMessageResult = z.infer<typeof agentMessageResultSchema>;
 export type BranchRef = z.infer<typeof branchRefSchema>;
 export type CheckoutTarget = BranchRef;
 export type PullStrategy = z.infer<typeof pullStrategySchema>;
