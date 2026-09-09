@@ -21,8 +21,9 @@ comments (`claude: step N done, <what>`), never in files here.
   a right-click menu on the file rows (Copy Path, Discard), and an
   "LGTM - Commit" button that hands the commit to the thread's agent —
   shipped 2026-09-09
-- COS-130 marketplace submission — open, unblocked now COS-146 is done, and
-  only on Costa's word; there is no release tag yet and package.json says 0.6.0
+- COS-130 marketplace submission — submitted 2026-09-10 as
+  get-bb/marketplace#231, off the tag `v0.7.0`. COS-148 watches it through
+  review; the clone the branch was pushed from is `~/Work/_marketplace/`
 - COS-142 hand-check the clipboard copies in a real browser (headless
   Chromium denies the write, so no script can) — done 2026-09-09, all three
   pass
