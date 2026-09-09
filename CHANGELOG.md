@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (2026-09-10)
 
 Three small ones off the backlog: what the popup remembers, what the watcher
 ignores, and what the click-through prints when it fails.
