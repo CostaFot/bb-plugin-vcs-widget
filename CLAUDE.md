@@ -131,7 +131,10 @@ a real message to the thread) on `scripts/live-lib.mjs` (system
 Chromium + puppeteer-core against `$BB_SERVER_URL`; fixture content must be
 unique per run, the scratch repo is reused). `scripts/screenshots.mjs`
 regenerates `docs/screenshots/*.png` for the README; with no repository
-argument it touches no git.
+argument it touches no git. `scripts/hero.mjs` composes the README's header
+image (`docs/screenshots/hero.png`) from those shots and `docs/hero/`
+(the background and the thread-header crop) by photographing a local HTML
+page, so it needs Chromium but no running bb.
 
 Vendor UI with `npx shadcn add @bb/<name>` (registry pinned in
 `components.json`); components live in `components/ui/` and are ours to edit.

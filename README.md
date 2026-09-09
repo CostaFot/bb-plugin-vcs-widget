@@ -1,13 +1,11 @@
 # VCS Widget for bb
 
-IntelliJ's Git branches popup, commit dialog and log, inside bb. Git runs on
+![The branch popup, the commit panel and the git log under a bb thread header](docs/screenshots/hero.png)
+
+IntelliJ style Git branches popup, commit dialog and log, inside bb. Git runs on
 the machine that owns the thread's worktree, so it also answers for a thread
 whose workspace is on another machine, where `git` in your own shell would read
 the wrong disk.
-
-![The branch popup open under the thread header](docs/screenshots/popup.png)
-
-*a branch button in every thread header opens this*
 
 ## Requirements
 
@@ -38,6 +36,10 @@ bb plugin dev                # rebuild and reload on save
 `CLAUDE.md` has the architecture and `docs/VERIFY.md` the live click-throughs.
 
 ## The branch popup
+
+![The branch popup open under the thread header](docs/screenshots/popup.png)
+
+*a branch button in every thread header opens this*
 
 - Search, then Favourites / Recent / Local / Remote, each row with ahead/behind,
   gone and worktree badges. A star toggles a favourite, kept per machine and
