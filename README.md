@@ -14,8 +14,7 @@ the wrong disk.
 - bb 0.42 or newer.
 - git 2.24 or newer on the machine that owns the worktree, for `git switch` and
   `--end-of-options`. Anything older and the popup says so rather than guessing.
-- npm on the machine running bb, which clones this repository and builds the
-  plugin itself at install time.
+- npm on the machine running bb, which builds the plugin at install time.
 
 ## Install
 
@@ -41,19 +40,19 @@ bb plugin dev                # rebuild and reload on save
 ## The branch popup
 
 - Search, then Favourites / Recent / Local / Remote, each row with ahead/behind,
-  gone and worktree badges. A star toggles a favourite, and favourites are kept
-  per machine and worktree rather than per thread.
+  gone and worktree badges. A star toggles a favourite, kept per machine and
+  worktree rather than per thread.
 - Quick actions across the top: Update Project, Commit..., Show Git Log, Fetch,
   Push..., New Branch..., Checkout Tag or Revision.
 - Right-click a branch, or use its "..." button, for the IntelliJ menu:
   Checkout, New Branch from, Checkout and Rebase onto current, Checkout and
   Update, Compare with current, Show Diff with Working Tree, Rebase current
   onto, Merge into current, New Worktree from, Update, Push..., Tracked Branch,
-  Rename, Delete, favourites and Copy Branch Name. A row that cannot run stays
-  where it is and says why in its tooltip.
-- Fetch, Update Project, Push, Update and remote Delete run as background jobs:
-  progress and a Cancel button in the status line. A job someone started in
-  another pane, or before a reload, shows up too.
+  Rename, Delete, favourites and Copy Branch Name. A row that cannot run says
+  why in its tooltip.
+- Fetch, Update Project, Push, Update and remote Delete run as background jobs,
+  with progress and Cancel in the status line. A job someone started in another
+  pane, or before a reload, shows up too.
 - A conflict banner with Abort while a merge, rebase, cherry-pick or revert is
   in progress.
 
@@ -66,18 +65,16 @@ bb plugin dev                # rebuild and reload on save
 - The checkbox is the staged state: ticking runs `git add`, unticking
   `git reset`, a partly staged file shows a mixed box, and a group header
   toggles the whole group.
-- The selected file renders in bb's diff viewer with both complete sides and a
+- The selected file renders in bb's diff viewer, both sides complete, with a
   Staged / Unstaged switch.
 - Below it: the message (Ctrl+Enter commits), Amend, Sign-off, Run Git hooks,
   Commit and Commit and Push. The commit runs as a background job so hooks can
   take their time — their output streams into the panel, and Cancel stops them.
-- Discard comes at three sizes: a hover button on a row, a right-click menu on
-  the row (Copy Path, Discard), and a header button that discards a whole
-  group. It always asks first, with one command per category.
-- Agent Commit and Agent Commit & Push run no git at all. They send
-  "LGTM - Commit" or "LGTM - Commit & Push" to this thread as if you had typed
-  it, so the agent that wrote the code writes the message and commits. They
-  carry a paper plane, and they stay enabled whatever is staged.
+- Discard on a row, from that row's right-click menu, or on a whole group from
+  its header. It always asks first, with one command per category.
+- Agent Commit and Agent Commit & Push run no git. They send "LGTM - Commit" or
+  "LGTM - Commit & Push" to the thread as if you had typed it, so the agent that
+  wrote the code writes the message.
 
 ## The git log
 
@@ -87,23 +84,23 @@ bb plugin dev                # rebuild and reload on save
   each commit carries as badges and a literal message filter. Rows are
   virtualised, with Load more at the end.
 - Selecting a commit opens the drawer below it: the full sha, both identities
-  and dates, the message, and the files it changed. Selecting one of those
-  files swaps the drawer for bb's diff viewer with both complete sides.
+  and dates, the message, and the files it changed. Picking one of those files
+  swaps the drawer for the diff.
 - Right-click a commit for Checkout Revision, New Branch from, Cherry-Pick,
   Revert Commit, Reset Current Branch to Here (Soft / Mixed / Hard), Compare
   with current and Copy Revision Number.
 
 ## The rest of it
 
-- Two more panel tabs: "Compare branches" (the commits only on either side,
-  the changed files, the patch per file) and "Diff with working tree", both in
-  bb's diff viewer. Compare also takes a revision, which is how the log
-  compares one commit with the current branch.
+- Two more panel tabs: "Compare branches" (the commits only on either side, the
+  changed files, the patch per file) and "Diff with working tree". Compare also
+  takes a revision, which is how the log compares one commit with the current
+  branch.
 - Eight command palette rows (`VCS Widget: ...`) on thread routes.
-- Live refresh: bb's sidebar follows a checkout within a few seconds, every open
-  popup for the same repository refetches after an action or a job, and changes
-  made by an agent or a terminal reach open popups through bb's environment
-  events and the host worker's own watch on the git directory.
+- Live refresh: bb's sidebar follows a checkout within a few seconds, open
+  popups refetch after an action or a job, and changes made by an agent or a
+  terminal reach them through bb's environment events and a watch on the git
+  directory.
 
 It does not do interactive rebase, stashes of its own (only auto-stash before
 Update Project), submodules, blame, or conflict resolution: the banner offers
@@ -126,9 +123,8 @@ Under Settings → Installed plugins → VCS Widget:
 
 Below the form, "Agent access" repeats what the plugin exposes outside the UI,
 and "Favourite branches" lists every starred branch with the machine and
-worktree it belongs to, with a Clear button per repository. It is the only
-place that store is visible, and the only place the per-worktree part of it
-shows.
+worktree it belongs to, with a Clear button per repository. It is the only place
+that store is visible.
 
 ## From a terminal, or an agent
 
@@ -146,36 +142,30 @@ table, and `--limit <n>` sets the rows. A usage error exits 2; a thread with no
 git repository exits 1 and says which.
 
 Agents get those same three reads as the `vcs_widget_status` tool, plus a
-bundled skill telling them the plugin cannot commit or push and that git
-changes are the human's to ask for.
+bundled skill telling them the plugin cannot commit or push and that git changes
+are the human's to ask for.
 
 ## Safety model
 
 What it will and will not do to your repository.
 
-- Git only ever runs as `spawn("git", argv)` on the host worker, never through
-  a shell. Refs go after `--end-of-options`, paths after `--`, and a commit
-  message goes on git's stdin instead of becoming an argument. Branch names are
-  validated in the UI, at the RPC boundary, and by `git check-ref-format
-  --branch` on the host. [docs/COMMANDS.md](docs/COMMANDS.md) lists the exact
-  argv behind every menu row, log row and commit control, because being able to
-  read them is the point.
+- Git only ever runs as `spawn("git", argv)` on the host worker, never through a
+  shell. Refs go after `--end-of-options`, paths after `--`, and a commit
+  message goes on git's stdin instead of becoming an argument.
+  [docs/COMMANDS.md](docs/COMMANDS.md) lists the exact argv behind every menu
+  row, log row and commit control, because being able to read them is the point.
 - Push, merge, rebase, delete, worktree, detached checkout, amend, cherry-pick,
   revert, reset, and Update Project on a dirty tree all ask first and show the
   command. Forced deletes, remote deletes, `reset --hard` and every discard are
   destructive confirms.
 - Nothing mutates while `.git/index.lock` exists, a merge, rebase, cherry-pick
   or revert is in progress, or a job holds the repository; the popup says which,
-  and offers Abort or Cancel. One mutation at a time per repository — a second
-  caller is told it is busy.
-- bb cancels a host call after 30 s, so every call runs against one 27 s budget:
-  each git command gets the time that is left, and git runs in its own process
-  group and is killed as a group (ssh, credential helpers and pull's children
-  included), which is a typed timeout rather than a transport failure. Network
-  work does not run inside that call at all: it takes the repository lock and a
-  worker lease, returns a job id, and reports through host signals.
+  and offers Abort or Cancel. One mutation at a time per repository.
+- Network work runs as a job rather than inside a request, so a slow remote
+  cannot hit bb's call deadline. Anything that does time out is killed as a
+  process group, ssh and credential helpers included.
 - The log's actions name the sha the row showed, never a branch name that could
-  have moved since, and the host resolves it before it runs anything.
+  have moved since.
 - **No agent tool or CLI can mutate the repository.** `bb vcs-widget` and
   `vcs_widget_status` reach exactly two of the host's reads, and there is no
   argument that turns either into a write.
@@ -185,11 +175,9 @@ What it will and will not do to your repository.
   can call them with a thread id, and a mutation on thread T runs on T's host.
   The plugin cannot close that from inside; it logs every mutation and every job
   with its thread id, so misuse is at least visible.
-- The two agent buttons are the one RPC method that runs no git. They send one
-  of two fixed texts to the thread as an ordinary user message
-  (`queue-if-active`, so it waits behind a running turn rather than steering
-  it), and the caller names a variant, never the text. It widens nothing: a
-  local process that can call it can already send a thread any message it likes
+- The two agent buttons send one of two fixed texts to the thread as an ordinary
+  user message, and the caller names a variant, never the text. It widens
+  nothing: whatever can call it can already send the thread any message it likes
   through bb's own API.
 
 ### How push decides
@@ -206,8 +194,8 @@ with a typed error. Nothing depends on `push.default`, `remote.pushDefault` or
 | the dialog's "force with lease" switch | adds `--force-with-lease=refs/heads/<branch>:<remote sha the dialog saw>` |
 
 The request names the branch and the sha the dialog showed. If either moved in
-the meantime the host answers `head_changed` and pushes nothing. Plain
-`--force` does not exist here.
+the meantime the host answers `head_changed` and pushes nothing. Plain `--force`
+does not exist here.
 
 ---
 
