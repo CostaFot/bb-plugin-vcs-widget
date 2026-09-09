@@ -21,7 +21,8 @@ comments (`claude: step N done, <what>`), never in files here.
   a right-click menu on the file rows (Copy Path, Discard), and an
   "LGTM - Commit" button that hands the commit to the thread's agent —
   shipped 2026-09-09
-- COS-130 marketplace submission — open, and only on Costa's word
+- COS-130 marketplace submission — open, unblocked now COS-146 is done, and
+  only on Costa's word; there is no release tag yet and package.json says 0.6.0
 - COS-142 hand-check the clipboard copies in a real browser (headless
   Chromium denies the write, so no script can) — done 2026-09-09, all three
   pass
@@ -35,7 +36,8 @@ comments (`claude: step N done, <what>`), never in files here.
   across the popup and its menu, LICENSE and the listing metadata —
   shipped 2026-09-09
 - COS-146 Costa reads `README.md` and `PLUGIN_OVERVIEW.md` himself, rendered,
-  before the plugin goes public — open, and COS-130 waits behind it
+  before the plugin goes public — done 2026-09-09; the overview's opening line
+  now matches the README's, nothing came out of the README pass
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
