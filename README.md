@@ -2,17 +2,13 @@
 
 ![The branch popup, the commit panel and the git log under a bb thread header](docs/screenshots/hero.png)
 
-IntelliJ style Git branches popup, commit dialog and log, inside bb. Git runs on
-the machine that owns the thread's worktree, so it also answers for a thread
-whose workspace is on another machine, where `git` in your own shell would read
-the wrong disk.
+IntelliJ style Git branches popup, commit dialog and log, inside bb.
 
 ## Requirements
 
 - bb 0.42 or newer.
-- git 2.24 or newer on the machine that owns the worktree, for `git switch` and
-  `--end-of-options`. Anything older and the popup says so rather than guessing.
-- npm on the machine running bb, which builds the plugin at install time.
+- git 2.24 or newer
+- npm
 
 ## Install
 
@@ -20,26 +16,9 @@ the wrong disk.
 bb plugin install https://github.com/CostaFot/bb-plugin-vcs-widget --yes
 ```
 
-That tracks the tip of `main`, so `bb plugin update vcs-widget` picks up new
-commits.
-
-To work on it instead:
-
-```sh
-npm install
-bb plugin types              # pin the SDK to your bb
-npm run check                # vitest + tsc + bb plugin build
-bb plugin install . --yes
-bb plugin dev                # rebuild and reload on save
-```
-
-`CLAUDE.md` has the architecture and `docs/VERIFY.md` the live click-throughs.
-
 ## The branch popup
 
 ![The branch popup open under the thread header](docs/screenshots/popup.png)
-
-*a branch button in every thread header opens this*
 
 - Search, then Favourites / Recent / Local / Remote, each row with ahead/behind,
   gone and worktree badges. A star toggles a favourite, kept per machine and
@@ -146,6 +125,18 @@ git repository exits 1 and says which.
 Agents get those same three reads as the `vcs_widget_status` tool, plus a
 bundled skill telling them the plugin cannot commit or push and that git changes
 are the human's to ask for.
+
+## Working on it
+
+```sh
+npm install
+bb plugin types              # pin the SDK to your bb
+npm run check                # vitest + tsc + bb plugin build
+bb plugin install . --yes
+bb plugin dev                # rebuild and reload on save
+```
+
+`CLAUDE.md` has the architecture and `docs/VERIFY.md` the live click-throughs.
 
 ## Safety model
 
