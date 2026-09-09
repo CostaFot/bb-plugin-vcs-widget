@@ -25,6 +25,10 @@ comments (`claude: step N done, <what>`), never in files here.
 - COS-142 hand-check the clipboard copies in a real browser (headless
   Chromium denies the write, so no script can) — done 2026-09-09, all three
   pass
+- COS-143 Agent Commit and Agent Commit & Push, one AGENT_ACTIONS table and a
+  variant on the wire — shipped 2026-09-09
+- COS-144 hand-check those two buttons: the Sent glyph, the tooltip, and the
+  push wording end to end (the live check reads that button, never clicks it)
 
 To resume: `bb status`, read this file, `linear issue view COS-125 --json`
 (and its comments; COS-121 to COS-124 hold the architecture and the M2 to M4
