@@ -154,6 +154,16 @@ composes the two section images the same way: `popup-combo.png` from
 and `log-combo.png` from `log.png` and `log-menu.png`. Those six hand-taken
 shots stay in `docs/screenshots/`, but the README shows only the two sheets.
 
+`docs/screenshots/listing/` is the marketplace's own set, and nothing else
+reads it. Three 16:10 images, because the listing page gives every screenshot
+`aspect-ratio: 16 / 10` with `object-fit: cover` and bb's in-app listing
+contains them at 420 px tall, so any other shape is cropped or shrunk. Each
+holds one element at close to its real size: the popup on the app background,
+the commit panel's file list over its message box and buttons, the log's
+commit list. They were cut from the 2x captures the first submission shipped
+(`~/Work/_marketplace/marketplace/screenshots/vcs-widget/`) with ImageMagick,
+by hand, and a retaken source means recutting them.
+
 Vendor UI with `npx shadcn add @bb/<name>` (registry pinned in
 `components.json`); components live in `components/ui/` and are ours to edit.
 Styling is Tailwind against host theme tokens only.
